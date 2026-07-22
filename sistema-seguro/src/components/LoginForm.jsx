@@ -22,7 +22,7 @@ export default function LoginForm() {
         evento.preventDefault();
         
         const endpoint = esRegistro ? '/api/registro' : '/api/login';
-        const url = `http://localhost:3000${endpoint}`;
+        const url = `https://mi-backend-seguro.onrender.com${endpoint}`;
 
         try {
             const peticion = await fetch(url, {
@@ -71,7 +71,7 @@ export default function LoginForm() {
             const tokenGuardado = localStorage.getItem('token_seguro');
             
             try {
-                const peticion = await fetch('http://localhost:3000/api/boveda', {
+                const peticion = await fetch('https://mi-backend-seguro.onrender.com/api/boveda', {
                     method: 'GET',
                     headers: {
                         'Authorization': `Bearer ${tokenGuardado}` // <--- Enseñamos la pulsera al guardia
