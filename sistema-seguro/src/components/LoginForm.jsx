@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-// 1. Importamos las herramientas mágicas de Firebase que creaste antes
 import { auth } from '../firebase'; 
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     onAuthStateChanged, 
-    signOut 
+    signOut,
+    sendPasswordResetEmail,      // NUEVO: Para recuperar contraseña
+    sendEmailVerification        // NUEVO: Para verificar el correo
 } from "firebase/auth";
 
 export default function LoginForm() {
@@ -13,36 +14,61 @@ export default function LoginForm() {
     const [password, setPassword] = useState('');
     const [esRegistro, setEsRegistro] = useState(false);
     const [sesionIniciada, setSesionIniciada] = useState(false);
+    
+    // NUEVO: Estado para controlar si el usuario ha verificado su email
+    const [emailNoVerificado, setEmailNoVerificado] = useState(false);
 
-    // 2. Firebase vigila automáticamente si ya estábamos dentro (sin usar localStorage)
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (usuario) => {
             if (usuario) {
-                setSesionIniciada(true);
+                // Comprobamos si el correo está verificado
+                if (usuario.emailVerified) {
+                    setSesionIniciada(true);
+                    setEmailNoVerificado(false);
+                } else {
+                    // Si no está verificado, lo echamos pero le avisamos
+                    setSesionIniciada(false);
+                    setEmailNoVerificado(true);
+                    signOut(auth); 
+                }
             } else {
                 setSesionIniciada(false);
+                setEmailNoVerificado(false);
             }
         });
         return () => unsubscribe();
     }, []);
 
-    // 3. Conexión directa con la base de datos de Firebase
     const manejarEnvio = async (evento) => {
         evento.preventDefault();
         
         try {
             if (esRegistro) {
-                // Registrar nuevo usuario en Firebase
-                await createUserWithEmailAndPassword(auth, email, password);
-                alert("¡Cuenta creada con éxito!");
+                // 1. Registra al usuario
+                const credenciales = await createUserWithEmailAndPassword(auth, email, password);
+                
+                // 2. NUEVO: Le manda el correo de verificación inmediatamente
+                await sendEmailVerification(credenciales.user);
+                
+                alert("¡Cuenta creada! Te hemos enviado un correo de verificación. Revisa tu bandeja de entrada o la carpeta de SPAM antes de iniciar sesión.");
+                
+                // Lo mandamos a la pantalla de login y vaciamos el formulario
+                setEsRegistro(false);
+                setPassword(''); 
+                signOut(auth); // Cerramos sesión para obligarle a verificar primero
+
             } else {
-                // Iniciar sesión comprobando en Firebase
-                await signInWithEmailAndPassword(auth, email, password);
-                // No hace falta cambiar el estado aquí, el useEffect de arriba se da cuenta solo
+                // Intenta iniciar sesión
+                const credenciales = await signInWithEmailAndPassword(auth, email, password);
+                
+                // Si el correo no está verificado, le mandamos una alerta.
+                // (El useEffect de arriba también se encarga de echarlo por seguridad).
+                if (!credenciales.user.emailVerified) {
+                   alert("Debes verificar tu correo electrónico antes de entrar. Revisa tu bandeja de entrada.");
+                }
             }
         } catch (error) {
             console.error("Error de Firebase:", error.code);
-            // Mensajes de error amigables
             if (error.code === 'auth/invalid-credential') {
                 alert("Correo o contraseña incorrectos.");
             } else if (error.code === 'auth/email-already-in-use') {
@@ -55,14 +81,30 @@ export default function LoginForm() {
         }
     };
 
-    // 4. Cerrar sesión con Firebase
+    // NUEVO: Función para recuperar la contraseña
+    const recuperarContrasena = async () => {
+        if (!email) {
+            alert("Por favor, escribe tu correo electrónico en la casilla de arriba primero.");
+            return;
+        }
+        try {
+            await sendPasswordResetEmail(auth, email);
+            alert("Te hemos enviado un correo con instrucciones para cambiar tu contraseña. Revisa tu bandeja de entrada.");
+        } catch (error) {
+            if (error.code === 'auth/invalid-email') {
+               alert("El formato del correo no es válido.");
+            } else {
+               alert("Error al enviar el correo. ¿Estás seguro de que existe esta cuenta?");
+            }
+        }
+    };
+
     const cerrarSesion = async () => {
         await signOut(auth);
         setEmail('');
         setPassword('');
     };
 
-    // Botón de prueba para el futuro
     const pedirDatosSecretos = () => {
         alert("¡Conexión perfecta! Aquí programaremos los Partes de Trabajo de la empresa.");
     };
@@ -99,6 +141,13 @@ export default function LoginForm() {
             <h2 style={{ marginBottom: '20px' }}>
                 {esRegistro ? 'Crear Nueva Cuenta' : 'Iniciar Sesión'}
             </h2>
+
+            {/* Aviso visual si intenta entrar sin verificar */}
+            {emailNoVerificado && !esRegistro && (
+                <div style={{ backgroundColor: '#fef2f2', color: '#ef4444', padding: '10px', borderRadius: '5px', marginBottom: '15px', maxWidth: '300px', textAlign: 'center' }}>
+                    ⚠️ Tu correo no está verificado. Por favor, revisa tu email y haz clic en el enlace que te mandamos.
+                </div>
+            )}
             
             <form onSubmit={manejarEnvio} style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px' }}>
                 <input 
@@ -123,6 +172,16 @@ export default function LoginForm() {
                     {esRegistro ? 'Registrarse' : 'Entrar'}
                 </button>
             </form>
+
+            {/* NUEVO: Botón de recuperar contraseña (solo aparece en Login) */}
+            {!esRegistro && (
+                <button 
+                    onClick={recuperarContrasena}
+                    style={{ marginTop: '15px', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '14px' }}
+                >
+                    ¿Olvidaste tu contraseña?
+                </button>
+            )}
 
             <button 
                 onClick={() => setEsRegistro(!esRegistro)}
