@@ -1,102 +1,86 @@
 import { useState, useEffect } from 'react';
+// 1. Importamos las herramientas mágicas de Firebase que creaste antes
+import { auth } from '../firebase'; 
+import { 
+    signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, 
+    onAuthStateChanged, 
+    signOut 
+} from "firebase/auth";
 
 export default function LoginForm() {
-    // 1. Estados de memoria
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [esRegistro, setEsRegistro] = useState(false);
-    
-    // NUEVO: Estado para saber si estamos dentro o fuera
     const [sesionIniciada, setSesionIniciada] = useState(false);
 
-    // NUEVO: useEffect se ejecuta una vez al abrir la página. 
-    // Comprueba si ya teníamos una pulsera guardada de ayer.
+    // 2. Firebase vigila automáticamente si ya estábamos dentro (sin usar localStorage)
     useEffect(() => {
-        const tokenGuardado = localStorage.getItem('token_seguro');
-        if (tokenGuardado) {
-            setSesionIniciada(true); // Si hay token, entramos directos
-        }
+        const unsubscribe = onAuthStateChanged(auth, (usuario) => {
+            if (usuario) {
+                setSesionIniciada(true);
+            } else {
+                setSesionIniciada(false);
+            }
+        });
+        return () => unsubscribe();
     }, []);
 
+    // 3. Conexión directa con la base de datos de Firebase
     const manejarEnvio = async (evento) => {
         evento.preventDefault();
         
-        const endpoint = esRegistro ? '/api/registro' : '/api/login';
-        const url = `https://mi-backend-seguro.onrender.com${endpoint}`;
-
         try {
-            const peticion = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
-            });
-
-            const respuesta = await peticion.json();
-            
-            if (respuesta.exito) {
-                // Si es un LOGIN exitoso, guardamos el token
-                if (!esRegistro && respuesta.token) {
-                    localStorage.setItem('token_seguro', respuesta.token);
-                    setSesionIniciada(true); // Cambiamos la pantalla
-                } else {
-                    alert(`¡Registro Exitoso! Ahora inicia sesión.`);
-                    setEsRegistro(false); // Lo mandamos a la pantalla de login
-                }
+            if (esRegistro) {
+                // Registrar nuevo usuario en Firebase
+                await createUserWithEmailAndPassword(auth, email, password);
+                alert("¡Cuenta creada con éxito!");
             } else {
-                alert(`Error: ${respuesta.mensaje}`);
+                // Iniciar sesión comprobando en Firebase
+                await signInWithEmailAndPassword(auth, email, password);
+                // No hace falta cambiar el estado aquí, el useEffect de arriba se da cuenta solo
             }
-
         } catch (error) {
-            console.error("Fallo de red crítico:", error);
-            alert("No se pudo conectar con el servidor.");
+            console.error("Error de Firebase:", error.code);
+            // Mensajes de error amigables
+            if (error.code === 'auth/invalid-credential') {
+                alert("Correo o contraseña incorrectos.");
+            } else if (error.code === 'auth/email-already-in-use') {
+                alert("Este correo ya está registrado.");
+            } else if (error.code === 'auth/weak-password') {
+                alert("La contraseña debe tener al menos 6 caracteres.");
+            } else {
+                alert("Hubo un error: " + error.message);
+            }
         }
     };
 
-    // Función para destruir el token y salir
-    const cerrarSesion = () => {
-        localStorage.removeItem('token_seguro');
-        setSesionIniciada(false);
+    // 4. Cerrar sesión con Firebase
+    const cerrarSesion = async () => {
+        await signOut(auth);
         setEmail('');
         setPassword('');
     };
 
+    // Botón de prueba para el futuro
+    const pedirDatosSecretos = () => {
+        alert("¡Conexión perfecta! Aquí programaremos los Partes de Trabajo de la empresa.");
+    };
+
     // --- RENDERIZADO CONDICIONAL ---
 
-    // SI ESTAMOS DENTRO: Mostramos el Panel de Control
-    // SI ESTAMOS DENTRO: Mostramos el Panel de Control
     if (sesionIniciada) {
-        
-        // Función que viaja a la ruta protegida con el Token en la mano
-        const pedirDatosSecretos = async () => {
-            const tokenGuardado = localStorage.getItem('token_seguro');
-            
-            try {
-                const peticion = await fetch('https://mi-backend-seguro.onrender.com/api/boveda', {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${tokenGuardado}` // <--- Enseñamos la pulsera al guardia
-                    }
-                });
-                
-                const respuesta = await peticion.json();
-                alert(respuesta.mensaje);
-                
-            } catch (error) {
-                alert("Error de conexión con la bóveda");
-            }
-        };
-
         return (
             <div style={{ textAlign: 'center', padding: '40px', backgroundColor: '#1f2937', borderRadius: '10px' }}>
                 <h2 style={{ color: '#10b981' }}>¡Acceso Concedido!</h2>
-                <p style={{ marginTop: '10px', marginBottom: '20px' }}>Estás dentro del área segura.</p>
+                <p style={{ marginTop: '10px', marginBottom: '20px' }}>Estás dentro del área segura de la empresa.</p>
                 
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
                     <button 
                         onClick={pedirDatosSecretos}
                         style={{ backgroundColor: '#8b5cf6', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
                     >
-                        Ver Datos Secretos
+                        Ver Partes de Trabajo
                     </button>
 
                     <button 
@@ -110,7 +94,6 @@ export default function LoginForm() {
         );
     }
 
-    // SI ESTAMOS FUERA: Mostramos el Formulario (Código anterior)
     return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <h2 style={{ marginBottom: '20px' }}>
