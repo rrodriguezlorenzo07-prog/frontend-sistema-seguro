@@ -1,4 +1,5 @@
 // 1. Importamos las herramientas de Firebase
+import { getFirestore } from 'firebase/firestore';
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth"; // <- Esta es la pieza clave para el Login
 
@@ -16,3 +17,4 @@ const firebaseConfig = {
 // 3. Encendemos Firebase y preparamos la Autenticación
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const db = getFirestore(app);
