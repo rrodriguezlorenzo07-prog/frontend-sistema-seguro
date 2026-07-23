@@ -1,4 +1,5 @@
     import ParteTrabajo from './ParteTrabajo';
+    import PanelOficina from './PanelOficina';
     import { useState, useEffect } from 'react';
     import { auth } from '../firebase'; 
     import { 
@@ -18,6 +19,7 @@
         
         // NUEVO: Estado para controlar si el usuario ha verificado su email
         const [emailNoVerificado, setEmailNoVerificado] = useState(false);
+        const [vistaOficina, setVistaOficina] = useState(false);
 
         useEffect(() => {
             const unsubscribe = onAuthStateChanged(auth, (usuario) => {
@@ -110,16 +112,21 @@
             alert("¡Conexión perfecta! Aquí programaremos los Partes de Trabajo de la empresa.");
         };
 
-        // --- RENDERIZADO CONDICIONAL ---
-
-        // --- RENDERIZADO CONDICIONAL ---
+     // --- RENDERIZADO CONDICIONAL ---
 
     if (sesionIniciada) {
         return (
-            <div style={{ textAlign: 'center', padding: '30px', backgroundColor: '#1f2937', borderRadius: '10px', width: '100%', maxWidth: '500px' }}>
-                <h2 style={{ color: '#10b981', marginBottom: '20px' }}>¡Área de Trabajo!</h2>
+            <div style={{ textAlign: 'center', padding: '30px', backgroundColor: '#1f2937', borderRadius: '10px', width: '100%', maxWidth: '600px' }}>
+                <h2 style={{ color: '#10b981', marginBottom: '20px' }}>Sistema de Gestión</h2>
                 
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
+                    <button 
+                        onClick={() => setVistaOficina(!vistaOficina)}
+                        style={{ backgroundColor: '#8b5cf6', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                        {vistaOficina ? '📝 Rellenar Nuevo Parte' : '🏢 Ver Panel de Oficina'}
+                    </button>
+
                     <button 
                         onClick={cerrarSesion}
                         style={{ backgroundColor: '#ef4444', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
@@ -128,15 +135,14 @@
                     </button>
                 </div>
 
-                {/* AQUÍ INYECTAMOS EL FORMULARIO NUEVO */}
-                <div style={{ backgroundColor: '#ffffff', padding: '15px', borderRadius: '10px', color: '#000000', textAlign: 'left' }}>
-                    <ParteTrabajo />
+                {/* AQUÍ DECIDIMOS QUÉ MOSTRAR SEGÚN EL BOTÓN */}
+                <div style={{ backgroundColor: '#ffffff', padding: '20px', borderRadius: '10px', color: '#000000', textAlign: 'left' }}>
+                    {vistaOficina ? <PanelOficina /> : <ParteTrabajo />}
                 </div>
                 
             </div>
         );
     }
-
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <h2 style={{ marginBottom: '20px' }}>
