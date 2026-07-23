@@ -1,11 +1,9 @@
 import LoginForm from './components/LoginForm';
 
-
-
 export default function App() {
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#111827', color: 'white', fontFamily: 'sans-serif' }}>
-            <h1 style={{ marginBottom: '20px' }}>Portal de Seguridad</h1>
+        // Le quitamos el fondo oscuro y lo dejamos preparado
+        <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}>
             <LoginForm />
         </div>
     );
