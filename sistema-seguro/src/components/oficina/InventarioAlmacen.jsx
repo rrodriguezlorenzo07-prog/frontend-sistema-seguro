@@ -1,0 +1,20 @@
+import React from 'react';
+import { Archive, Edit, Trash2 } from 'lucide-react';
+
+export default function InventarioAlmacen({ blockStyle, btnBlackStyle, inputStyle, exportarAlmacenExcel, nuevoMatNombre, setNuevoMatNombre, materialesList, nuevoMatStock, setNuevoMatStock, agregarMaterial, filtroMateriales, setFiltroMateriales, ordenMateriales, setOrdenMateriales, materialesCoincidentes, editandoMatId, matEditado, setMatEditado, guardarEdicionMat, setEditandoMatId, iniciarEdicionMat, borrarMaterial }) {
+  return (
+      <div style={blockStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}><h3 style={{ margin: 0, fontSize: '18px', fontWeight: '300', letterSpacing: '2px', textTransform: 'uppercase' }}>Inventario Central</h3><button onClick={exportarAlmacenExcel} style={{ ...btnBlackStyle, backgroundColor: '#ffffff', color: '#1a1a1a', border: '1px solid #1a1a1a' }}><Archive size={14}/> Exportar CSV</button></div>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '25px' }}><input type="text" list="lista-nombres-materiales" value={nuevoMatNombre} onChange={(e) => setNuevoMatNombre(e.target.value)} placeholder="Referencia material..." style={{...inputStyle, flex: 2}} /><datalist id="lista-nombres-materiales">{materialesList.map(m => <option key={m.id} value={m.nombre} />)}</datalist><input type="number" value={nuevoMatStock} onChange={(e) => setNuevoMatStock(e.target.value)} placeholder="Uds." style={{...inputStyle, flex: 1}} /><button onClick={agregarMaterial} style={btnBlackStyle}>Registrar</button></div>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}><input type="text" placeholder="Filtrar catálogo..." value={filtroMateriales} onChange={(e) => setFiltroMateriales(e.target.value)} style={{...inputStyle, flex: 2}} /><select value={ordenMateriales} onChange={(e) => setOrdenMateriales(e.target.value)} style={{...inputStyle, flex: 1, cursor: 'pointer'}}><option value="alfabetico">Alfabético</option><option value="menor">Menor stock</option><option value="mayor">Mayor stock</option></select></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', backgroundColor: '#e5e7eb', border: '1px solid #e5e7eb' }}>
+          {materialesCoincidentes.map(mat => ( 
+              <div key={mat.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: '15px 20px' }}>
+                  {editandoMatId === mat.id ? <div style={{ display: 'flex', gap: '10px', width: '100%', alignItems: 'center' }}><input type="text" value={matEditado.nombre} onChange={e => setMatEditado({...matEditado, nombre: e.target.value})} style={{ flex: 2, padding: '8px', border: '1px solid #1a1a1a', outline: 'none' }} /><input type="number" value={matEditado.stock} onChange={e => setMatEditado({...matEditado, stock: e.target.value})} style={{ flex: 1, padding: '8px', border: '1px solid #1a1a1a', outline: 'none' }} /><button onClick={guardarEdicionMat} style={{ background: '#1a1a1a', color: 'white', border: 'none', padding: '8px 12px', cursor: 'pointer' }}>Guardar</button><button onClick={() => setEditandoMatId(null)} style={{ background: 'transparent', border: '1px solid #1a1a1a', padding: '8px 12px', cursor: 'pointer' }}>Cancelar</button></div> : 
+                  <> <span style={{ fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase' }}>{mat.nombre}</span><div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}><span style={{ fontSize: '12px', letterSpacing: '1px', color: mat.stock < 5 ? '#ef4444' : '#1a1a1a' }}>STOCK: {mat.stock}</span><button onClick={() => iniciarEdicionMat(mat)} style={{ color: '#1a1a1a', background: 'none', border: 'none', cursor: 'pointer' }}><Edit size={16} /></button><button onClick={() => borrarMaterial(mat.id)} style={{ color: '#1a1a1a', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={16} /></button></div> </>}
+              </div> 
+          ))}
+        </div>
+      </div> 
+  );
+}
