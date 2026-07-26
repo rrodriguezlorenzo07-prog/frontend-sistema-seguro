@@ -8,62 +8,6 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
   const [partePreview, setPartePreview] = useState(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
 
-  // 🥷 EL TÚNEL PROXY: Salta la seguridad del navegador y pone fondo blanco
-  const obtenerFirmaSegura = (urlFirma) => {
-      return new Promise((resolve) => {
-          if (!urlFirma) return resolve(null);
-
-          const img = new Image();
-          img.crossOrigin = "Anonymous"; // Pedimos permiso VIP
-
-          // Si es un enlace de Firebase, lo pasamos por el túnel Proxy
-          if (urlFirma.startsWith('http')) {
-              img.src = 'https://corsproxy.io/?' + encodeURIComponent(urlFirma);
-          } else {
-              img.src = urlFirma; // Si es local, pasa directo
-          }
-
-          img.onload = () => {
-              try {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = img.width || 300;
-                  canvas.height = img.height || 150;
-                  const ctx = canvas.getContext('2d');
-                  
-                  // Fondo blanco impecable
-                  ctx.fillStyle = '#ffffff'; 
-                  ctx.fillRect(0, 0, canvas.width, canvas.height);
-                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                  
-                  // Devolvemos un JPEG perfecto que jsPDF amará
-                  resolve(canvas.toDataURL('image/jpeg', 0.9));
-              } catch (e) {
-                  resolve(null);
-              }
-          };
-
-          img.onerror = () => {
-              // Si falla el primer túnel, intentamos un segundo túnel de emergencia
-              const imgBackup = new Image();
-              imgBackup.crossOrigin = "Anonymous";
-              imgBackup.onload = () => {
-                  try {
-                      const canvas = document.createElement('canvas');
-                      canvas.width = imgBackup.width || 300;
-                      canvas.height = imgBackup.height || 150;
-                      const ctx = canvas.getContext('2d');
-                      ctx.fillStyle = '#ffffff';
-                      ctx.fillRect(0, 0, canvas.width, canvas.height);
-                      ctx.drawImage(imgBackup, 0, 0, canvas.width, canvas.height);
-                      resolve(canvas.toDataURL('image/jpeg', 0.9));
-                  } catch(e) { resolve(null); }
-              };
-              imgBackup.onerror = () => resolve(null);
-              imgBackup.src = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(urlFirma);
-          };
-      });
-  };
-
   const generarPDFAlbaran = async (parte) => {
       setGenerandoPDF(true);
       try {
@@ -140,21 +84,23 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
           
           finalY = finalY + 15 + (textoTrabajo.length * 5);
 
-          // === INYECCIÓN DE LA FIRMA SEGURA ===
+          // === INYECCIÓN DIRECTA DE LA URL DE FIREBASE STORAGE ===
           if (parte.firma && typeof parte.firma === 'string') {
               doc.setFontSize(10); 
               doc.setFont("helvetica", "bold"); 
               doc.text("FIRMA DE CONFORMIDAD:", 14, finalY + 10);
               
-              // Aquí el código espera a que el túnel proxy nos devuelva la imagen limpia
-              const firmaLimpia = await obtenerFirmaSegura(parte.firma);
-              
-              if (firmaLimpia) {
-                  doc.addImage(firmaLimpia, 'JPEG', 14, finalY + 15, 60, 30);
-              } else {
-                  doc.setFontSize(8); 
-                  doc.setFont("helvetica", "normal");
-                  doc.text("(Firma digital registrada. El sistema de seguridad bloqueó la impresión visual.)", 14, finalY + 20);
+              try {
+                  // Como ahora es una URL limpia, jsPDF la procesa directamente sin sobrecargar memoria
+                  doc.addImage(parte.firma, 'PNG', 14, finalY + 15, 60, 30);
+              } catch (e1) {
+                  try {
+                      doc.addImage(parte.firma, 'JPEG', 14, finalY + 15, 60, 30);
+                  } catch (e2) {
+                      doc.setFontSize(8); 
+                      doc.setFont("helvetica", "normal");
+                      doc.text("(Firma digital registrada en servidor central)", 14, finalY + 20);
+                  }
               }
           }
 
@@ -196,13 +142,13 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
                            <div style={{ marginBottom: '20px' }}>
                                <p style={{ margin: '0 0 5px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Personal Asignado</p>
-                               <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #e5e7eb' }}>{partePreview.cuadrilla?.length > 0 ? partePreview.cuadrilla.map(c=>`${c.nombre} (${c.horas}h n. / ${c.horasExtra || 0}h ex.)`).join(' - ') : partePreview.nombreTrabajador}</p>
+                               <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #1a1a1a' }}>{partePreview.cuadrilla?.length > 0 ? partePreview.cuadrilla.map(c=>`${c.nombre} (${c.horas}h n. / ${c.horasExtra || 0}h ex.)`).join(' - ') : partePreview.nombreTrabajador}</p>
                            </div>
 
                            {partePreview.materialesUsados && partePreview.materialesUsados.length > 0 && (
                                <div style={{ marginBottom: '20px' }}>
                                    <p style={{ margin: '0 0 5px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Material Empleado</p>
-                                   <ul style={{ margin: 0, padding: '10px 10px 10px 25px', backgroundColor: '#fafafa', border: '1px solid #e5e7eb' }}>
+                                   <ul style={{ margin: 0, padding: '10px 10px 10px 25px', backgroundColor: '#fafafa', border: '1px solid #1a1a1a' }}>
                                        {partePreview.materialesUsados.map((m, i) => <li key={i}>{m.cantidad}x {m.nombre}</li>)}
                                    </ul>
                                </div>
@@ -210,25 +156,25 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
                            <div style={{ marginBottom: '20px' }}>
                                <p style={{ margin: '0 0 5px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Trabajo Realizado</p>
-                               <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #e5e7eb', whiteSpace: 'pre-wrap' }}>{partePreview.trabajo || 'Sin observaciones'}</p>
+                               <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #1a1a1a', whiteSpace: 'pre-wrap' }}>{partePreview.trabajo || 'Sin observaciones'}</p>
                            </div>
 
                            {partePreview.firma && (
                                <div style={{ marginTop: '30px' }}>
                                    <p style={{ margin: '0 0 10px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Firma de Conformidad</p>
-                                   <img src={partePreview.firma} alt="Firma" style={{ height: '100px', objectFit: 'contain', border: '1px dashed #cbd5e1', padding: '10px', backgroundColor: '#fafafa' }} />
+                                   <img src={partePreview.firma} alt="Firma" style={{ height: '100px', objectFit: 'contain', border: '1px dashed #1a1a1a', padding: '10px', backgroundColor: '#fafafa' }} />
                                </div>
                            )}
                       </div>
                       
-                      <div style={{ padding: '20px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '10px', position: 'sticky', bottom: 0, backgroundColor: '#fafafa' }}>
+                      <div style={{ padding: '20px', borderTop: '1px solid #1a1a1a', display: 'flex', justifyContent: 'flex-end', gap: '10px', position: 'sticky', bottom: 0, backgroundColor: '#fafafa' }}>
                            <button onClick={() => setPartePreview(null)} style={{ padding: '12px 20px', background: 'transparent', border: '1px solid #1a1a1a', color: '#1a1a1a', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'pointer' }}>Cancelar</button>
                            <button 
                                onClick={() => generarPDFAlbaran(partePreview)} 
                                style={{...btnBlackStyle, opacity: generandoPDF ? 0.7 : 1}}
                                disabled={generandoPDF}
                            >
-                               <Download size={16} /> {generandoPDF ? 'Procesando firma...' : 'Descargar PDF'}
+                               <Download size={16} /> {generandoPDF ? 'Generando...' : 'Descargar PDF'}
                            </button>
                       </div>
                   </div>
@@ -265,7 +211,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                   
                   <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>ASIGNACIÓN:</strong> {parte.cuadrilla?.length > 0 ? parte.cuadrilla.map(c=>`${c.nombre} (${c.horas}h n. / ${c.horasExtra||0}h ex.)`).join(' - ') : parte.nombreTrabajador}</div>
                   <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>MATERIAL:</strong> {parte.materialesUsados?.length > 0 ? parte.materialesUsados.map(m=>`${m.cantidad}x ${m.nombre}`).join(' / ') : 'Ninguno'}</div>
-                  <div style={{ fontSize: '12px', color: '#475569', borderLeft: '3px solid #1a1a1a', paddingLeft: '10px', marginTop: '10px' }}><em>"{parte.trabajo || 'Sin observaciones'}"</em></div>
+                  <div style={{ fontSize: '12px', color: '#475569', borderLeft: '3px solid #1a1a1a', paddingLeft: '10px', marginTop: '10px' }}><em>"{parte.parte || parte.trabajo || 'Sin observaciones'}"</em></div>
               </div>
             ))}
           </div>

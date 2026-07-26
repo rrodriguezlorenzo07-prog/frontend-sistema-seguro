@@ -73,15 +73,25 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
     setMensaje({ texto: 'ENVIANDO DOCUMENTO...', tipo: 'warning' });
     
     let firmaUrlFinal = null;
-    let base64Firma = firmaRef.current.isEmpty() ? null : firmaRef.current.getCanvas().toDataURL('image/png');
-
-    if (base64Firma) {
+    
+    // Si hay firma, la subimos a Firebase Storage de forma obligatoria
+    if (!firmaRef.current.isEmpty()) {
         try {
-            const nombreArchivo = `firmas/firma_${Date.now()}.png`;
+            const base64Firma = firmaRef.current.getCanvas().toDataURL('image/png');
+            const nombreArchivo = `firmas/firma_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png`;
             const firmaStorageRef = ref(storage, nombreArchivo);
+            
+            // Subimos la imagen al "trastero" de Firebase Storage
             await uploadString(firmaStorageRef, base64Firma, 'data_url');
+            
+            // Obtenemos el enlace web corto y limpio
             firmaUrlFinal = await getDownloadURL(firmaStorageRef);
-        } catch (err) { firmaUrlFinal = base64Firma; }
+        } catch (err) {
+            console.error("Error al subir la firma a Storage:", err);
+            setMensaje({ texto: 'ERROR AL SUBIR LA FIRMA', tipo: 'error' });
+            setTimeout(() => setMensaje({ texto: '', tipo: '' }), 4000);
+            return; // Cortamos el envío si la firma falla
+        }
     }
 
     const nombreFinalObra = esOtraObra ? obraNombreManual : obraSeleccionada?.nombre;
@@ -91,7 +101,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         habitacionesRango: habitacionesRango, 
         trabajo: trabajoLibre, 
         materialesUsados: materialesUsados, 
-        firma: firmaUrlFinal, 
+        firma: firmaUrlFinal, // <--- Aquí ya viaja solo el enlace web corto (ej: https://firebasestorage...)
         creador: usuario.email, 
         nombreTrabajador: nombreOficial,
         fecha: new Date().toLocaleDateString(), 
