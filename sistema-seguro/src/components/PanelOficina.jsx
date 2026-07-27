@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db, auth, authSecundario } from '../firebase'; 
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, getDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, getDoc, writeBatch } from 'firebase/firestore';
 import { signOut, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth'; 
 import { Building2, FileText, Users, Calculator, Inbox, CheckCircle, Package, FolderOpen, AlertTriangle, Settings, Menu, X, ArrowLeftRight } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -199,29 +199,184 @@ export default function PanelOficina({ cambiarVista }) {
 
   const borrarCertificacion = (id, partesIds) => { pedirConfirmacion("Anular Certificación", "Al anular, los albaranes quedan libres. La certificación irá a la papelera.", async () => { await updateDoc(doc(db, 'certificaciones', id), { papelera: true }); for (let pId of partesIds) { await updateDoc(doc(db, 'partes_de_trabajo', pId), { certificado: false, idCertificacion: null }); } cargarDatos(); mostrarToast("Certificación en la papelera."); }); };
   const toggleItemFacturacion = (id) => { setItemsAFacturar(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
+const generarPDFFactura = async (e) => {
+      // 0. EL FRENO DE MANO: Evita que el navegador recargue la página al pulsar el botón
+      if (e) e.preventDefault();
 
-  const generarPDFFactura = async () => {
-      if(!facturaCliente) { mostrarToast("Escribe el nombre del cliente/entidad.", "error"); return; }
-      if(itemsAFacturar.length === 0) { mostrarToast("Selecciona al menos un documento para facturar.", "error"); return; }
-      let horasTotales = 0; let conceptos = [];
-      if (modoFacturacion === 'albaranes') { const albs = partesHistorial.filter(p => itemsAFacturar.includes(p.id)); horasTotales = albs.reduce((acc, p) => acc + (Number(p.horasTotales) || 0), 0); conceptos = albs.map(a => `Albarán Ref. ${a.fecha} - ${a.obra}`); } 
-      else { const certs = certificacionesActivas.filter(c => itemsAFacturar.includes(c.id)); horasTotales = certs.reduce((acc, c) => acc + (Number(c.totalHoras) || 0), 0); conceptos = certs.map(c => `Certificación Ref. ${c.referencia} - ${c.obra}`); }
-      const tarifa = parseFloat(facTarifaHora) || 0; const extraMat = parseFloat(facImporteMateriales) || 0; const subtotalHoras = horasTotales * tarifa; const baseImponible = subtotalHoras + extraMat; const iva = baseImponible * 0.21; const total = baseImponible + iva;
+      // 1. Validar que hay nombre de cliente
+      if (!facturaCliente || facturaCliente.trim() === '') {
+          alert("¡Error! Es obligatorio introducir el nombre o razón social del cliente.");
+          return;
+      }
+
+      // 2. Validar que hay elementos seleccionados
+      if (!itemsAFacturar || itemsAFacturar.length === 0) {
+          alert("Por favor, selecciona al menos un albarán o certificación para facturar.");
+          return;
+      }
+
+      const tarifa = parseFloat(facTarifaHora) || 0;
+      const matExtra = parseFloat(facImporteMateriales) || 0;
+      const clienteFinal = facturaCliente.trim();
+
       try {
-          const pdfDoc = new jsPDF(); pdfDoc.setTextColor(0, 0, 0); pdfDoc.setFontSize(24); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("FACTURA", 14, 25);
-          const numFactura = `F-${new Date().getFullYear()}-${Date.now().toString().slice(-4).toUpperCase()}`;
-          pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text(`Nº Factura: ${numFactura}`, 14, 33); pdfDoc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 38); pdfDoc.setFontSize(11); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("GestiónPro Software & Maintenance", 196, 25, { align: 'right' }); pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text("Soporte Técnico y Reformas", 196, 31, { align: 'right' }); pdfDoc.text("NIF: B-12345678", 196, 37, { align: 'right' }); pdfDoc.setDrawColor(0, 0, 0); pdfDoc.setLineWidth(0.8); pdfDoc.line(14, 45, 196, 45); pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("FACTURADO A:", 14, 55); pdfDoc.setFontSize(12); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text(facturaCliente, 14, 62);
-          let datosTabla = []; if (horasTotales > 0) datosTabla.push(["Mano de obra y ejecución técnica", `${horasTotales} h`, `${tarifa.toFixed(2)} €`, `${subtotalHoras.toFixed(2)} €`]); if (extraMat > 0) datosTabla.push(["Materiales, suministros y extras", "-", "-", `${extraMat.toFixed(2)} €`]); conceptos.forEach(c => datosTabla.push([c, "-", "-", "-"]));
-          autoTable(pdfDoc, { startY: 75, head: [['Concepto / Descripción', 'Cantidad', 'Precio Unit.', 'Importe']], body: datosTabla, theme: 'grid', headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold', halign: 'left' }, columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' } }, styles: { fontSize: 10, cellPadding: 6, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.1 }, alternateRowStyles: { fillColor: [245, 245, 245] } });
-          const finalY = (pdfDoc.lastAutoTable ? pdfDoc.lastAutoTable.finalY : 120) + 15; const boxX = 130; pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text("Base Imponible:", boxX, finalY); pdfDoc.text(`${baseImponible.toFixed(2)} €`, 196, finalY, { align: 'right' }); pdfDoc.text("IVA (21%):", boxX, finalY + 8); pdfDoc.text(`${calcIva.toFixed(2)} €`, 196, finalY + 8, { align: 'right' }); pdfDoc.setDrawColor(0, 0, 0); pdfDoc.setLineWidth(0.5); doc.line(boxX, finalY + 12, 196, finalY + 12); pdfDoc.setFontSize(12); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("TOTAL FACTURA:", boxX - 15, finalY + 20); pdfDoc.text(`${total.toFixed(2)} €`, 196, finalY + 20, { align: 'right' });
-          const nuevaFactura = { cliente: facturaCliente, referencia: numFactura, tipo: modoFacturacion, itemsIds: itemsAFacturar, base: baseImponible, iva: iva, total: total, fecha: new Date().toLocaleDateString(), timestamp: Date.now() }; await addDoc(collection(db, 'facturas'), nuevaFactura);
-          for (let id of itemsAFacturar) { if (modoFacturacion === 'albaranes') { await updateDoc(doc(db, 'partes_de_trabajo', id), { facturado: true }); } else { await updateDoc(doc(db, 'certificaciones', id), { facturado: true }); } }
-          setItemsAFacturar([]); setFacturaCliente(''); setFacTarifaHora(''); setFacImporteMateriales(''); cargarDatos(); pdfDoc.save(`Factura_${facturaCliente.replace(/[^a-zA-Z0-9]/g, '_')}_${numFactura}.pdf`); mostrarToast("Factura emitida y contabilizada.");
-      } catch(e) { console.error(e); mostrarToast("Error al emitir factura", "error"); }
+          const docPdf = new jsPDF();
+          docPdf.setTextColor(0, 0, 0); 
+          docPdf.setFontSize(22); 
+          docPdf.setFont("helvetica", "bold"); 
+          docPdf.text("FACTURA OFICIAL", 14, 25);
+
+          const referenciaFac = `FAC-${Date.now().toString().slice(-6).toUpperCase()}`;
+
+          docPdf.setFontSize(10);
+          docPdf.setFont("helvetica", "normal");
+          docPdf.text(`Nº Factura: ${referenciaFac}`, 14, 33);
+          docPdf.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 38);
+          docPdf.text(`Cliente: ${clienteFinal}`, 14, 43);
+
+          docPdf.setDrawColor(0, 0, 0);
+          docPdf.setLineWidth(0.8);
+          docPdf.line(14, 50, 196, 50);
+
+          let cuerpoTabla = [];
+          let totalHorasGlobal = 0;
+
+          if (modoFacturacion === 'albaranes') {
+              const albaranesSeleccionados = partesHistorial.filter(p => itemsAFacturar.includes(p.id));
+              albaranesSeleccionados.forEach(p => {
+                  const horas = parseFloat(p.horasTotales || p.horas || 0);
+                  totalHorasGlobal += horas;
+                  cuerpoTabla.push([
+                      `Albarán: ${p.obra || 'General'} (${p.fecha || ''})`,
+                      `${horas}h`,
+                      `${(horas * tarifa).toFixed(2)} €`
+                  ]);
+              });
+          } else {
+              const certificacionesSeleccionadas = certificacionesList.filter(c => itemsAFacturar.includes(c.id));
+              certificacionesSeleccionadas.forEach(c => {
+                  const horas = parseFloat(c.totalHoras || 0);
+                  totalHorasGlobal += horas;
+                  cuerpoTabla.push([
+                      `Certificación REF: ${c.referencia || ''} - Obra: ${c.obra || ''}`,
+                      `${horas}h`,
+                      `${(horas * tarifa).toFixed(2)} €`
+                  ]);
+              });
+          }
+
+          if (matExtra > 0) {
+              cuerpoTabla.push(['Materiales y Suministros Extra', '1 ud', `${matExtra.toFixed(2)} €`]);
+          }
+
+          autoTable(docPdf, {
+              startY: 60,
+              head: [['Concepto / Descripción', 'Cantidad / Horas', 'Importe']],
+              body: cuerpoTabla,
+              theme: 'grid',
+              headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold' },
+              styles: { fontSize: 10, cellPadding: 6, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.1 }
+          });
+
+          let finalY = docPdf.lastAutoTable.finalY + 15;
+          const subtotalHoras = totalHorasGlobal * tarifa;
+          const totalGeneral = subtotalHoras + matExtra;
+
+          docPdf.setFontSize(11);
+          docPdf.setFont("helvetica", "bold");
+          docPdf.text(`TOTAL A PAGAR: ${totalGeneral.toFixed(2)} €`, 196, finalY, { align: 'right' });
+
+          // 3. Guardar la factura en Firestore y guardar la referencia
+          const nuevaFacturaData = {
+              referencia: referenciaFac,
+              cliente: clienteFinal,
+              fecha: new Date().toLocaleDateString(),
+              total: totalGeneral,
+              items: itemsAFacturar,
+              modo: modoFacturacion,
+              timestamp: Date.now()
+          };
+          const docRef = await addDoc(collection(db, 'facturas'), nuevaFacturaData);
+
+          // 4. BLOQUEAR ELEMENTOS EN FIRESTORE (Marcar facturado: true)
+          const nombreColeccion = modoFacturacion === 'albaranes' ? 'partes_de_trabajo' : 'certificaciones';
+          
+          for (const idItem of itemsAFacturar) {
+              const refItem = doc(db, nombreColeccion, idItem);
+              await updateDoc(refItem, { facturado: true });
+          }
+
+          docPdf.save(`Factura_${referenciaFac}.pdf`);
+          
+          // ---> LA MAGIA VISUAL: ACTUALIZAMOS LA PANTALLA AL INSTANTE <---
+          
+          // Añadimos la factura a la lista visual de abajo
+          if (typeof setFacturasList === 'function') {
+              setFacturasList(prev => [{ id: docRef.id, ...nuevaFacturaData }, ...prev]);
+          }
+
+          // Descontamos las certificaciones o albaranes para que desaparezcan en el acto
+          if (modoFacturacion === 'certificaciones') {
+              if (typeof setCertificacionesList === 'function') {
+                  setCertificacionesList(prev => prev.map(c => itemsAFacturar.includes(c.id) ? { ...c, facturado: true } : c));
+              }
+          } else {
+              if (typeof setPartesHistorial === 'function') {
+                  setPartesHistorial(prev => prev.map(p => itemsAFacturar.includes(p.id) ? { ...p, facturado: true } : p));
+              }
+          }
+
+          alert("¡Factura emitida y elementos bloqueados con éxito!");
+
+          // 5. Limpiar selección y formulario
+          setItemsAFacturar([]);
+          setFacturaCliente('');
+          setFacTarifaHora('');
+          setFacImporteMateriales('');
+
+      } catch (error) {
+          console.error("Error al emitir factura:", error);
+          alert("Error al emitir la factura: " + error.message);
+      }
+  
   };
 
-  const borrarFactura = (factura) => { pedirConfirmacion("Anular Factura", "Al borrar esta factura, los documentos que agrupaba volverán a estar pendientes. ¿Estás seguro?", async () => { await deleteDoc(doc(db, 'facturas', factura.id)); for (let id of factura.itemsIds) { if (factura.tipo === 'albaranes') { await updateDoc(doc(db, 'partes_de_trabajo', id), { facturado: false }); } else { await updateDoc(doc(db, 'certificaciones', id), { facturado: false }); } } cargarDatos(); mostrarToast("Factura anulada."); }); };
-  const agregarItemPresupuesto = () => { if(!presuSelectMat || !presuCantMat || !presuPrecioMat) { mostrarToast("Completa los datos del concepto.", "error"); return; } setPresuItems([...presuItems, { id: Date.now(), nombre: presuSelectMat, cantidad: parseFloat(presuCantMat), precioUnitario: parseFloat(presuPrecioMat), total: parseFloat(presuCantMat) * parseFloat(presuPrecioMat) }]); setPresuSelectMat(''); setPresuCantMat(1); setPresuPrecioMat(''); };
+const borrarFactura = (factura) => { 
+    pedirConfirmacion(
+        "Anular Factura", 
+        "Al borrar esta factura, los documentos que agrupaba volverán a estar pendientes. ¿Estás seguro?", 
+        async () => { 
+            try {
+                // 1. Creamos una "caja" vacía para mandar las órdenes de golpe
+                const batch = writeBatch(db);
+                
+                // 2. Metemos en la caja la orden de borrar la factura
+                const refFactura = doc(db, 'facturas', factura.id);
+                batch.delete(refFactura);
+
+                // 3. Metemos en la caja las órdenes de actualizar los albaranes/certificaciones
+                const arrayDeIds = factura.items || [];
+                const nombreColeccion = factura.modo === 'albaranes' ? 'partes_de_trabajo' : 'certificaciones';
+
+                for (let id of arrayDeIds) { 
+                    const refItem = doc(db, nombreColeccion, id);
+                    batch.update(refItem, { facturado: false }); 
+                } 
+                
+                // 4. ENVIAMOS LA CAJA DE GOLPE (Esto es lo que hace que sea súper rápido y sin cuelgues)
+                await batch.commit();
+
+                // 5. Refrescamos la pantalla
+                cargarDatos(); 
+                mostrarToast("Factura anulada correctamente."); 
+
+            } catch (error) {
+                console.error("Error al anular factura:", error);
+                mostrarToast("Hubo un error al anular la factura.", "error");
+            }
+        }
+    ); 
+};  const agregarItemPresupuesto = () => { if(!presuSelectMat || !presuCantMat || !presuPrecioMat) { mostrarToast("Completa los datos del concepto.", "error"); return; } setPresuItems([...presuItems, { id: Date.now(), nombre: presuSelectMat, cantidad: parseFloat(presuCantMat), precioUnitario: parseFloat(presuPrecioMat), total: parseFloat(presuCantMat) * parseFloat(presuPrecioMat) }]); setPresuSelectMat(''); setPresuCantMat(1); setPresuPrecioMat(''); };
   const quitarItemPresupuesto = (id) => { setPresuItems(presuItems.filter(item => item.id !== id)); };
   
   const generarPDFPresupuesto = (datos) => {
