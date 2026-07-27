@@ -8,6 +8,31 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
   const [partePreview, setPartePreview] = useState(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
 
+  // Función para convertir la URL de Firebase Storage en una imagen legible para jsPDF al vuelo
+  const convertirUrlABase64 = (url) => {
+      return new Promise((resolve) => {
+          if (!url) return resolve(null);
+          if (url.startsWith('data:image')) return resolve(url); // Si ya es base64
+
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width || 300;
+              canvas.height = img.height || 150;
+              const ctx = canvas.getContext('2d');
+              ctx.fillStyle = '#ffffff'; // Fondo blanco obligatorio
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0);
+              resolve(canvas.toDataURL('image/png'));
+          };
+          img.onerror = () => {
+              resolve(null);
+          };
+          img.src = url;
+      });
+  };
+
   const generarPDFAlbaran = async (parte) => {
       setGenerandoPDF(true);
       try {
@@ -84,23 +109,26 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
           
           finalY = finalY + 15 + (textoTrabajo.length * 5);
 
-          // === INYECCIÓN DIRECTA DE LA URL DE FIREBASE STORAGE ===
-          if (parte.firma && typeof parte.firma === 'string') {
+          // === ESTAMPADO DE FIRMA CORREGIDO ===
+          if (parte.firma) {
               doc.setFontSize(10); 
               doc.setFont("helvetica", "bold"); 
               doc.text("FIRMA DE CONFORMIDAD:", 14, finalY + 10);
               
-              try {
-                  // Como ahora es una URL limpia, jsPDF la procesa directamente sin sobrecargar memoria
-                  doc.addImage(parte.firma, 'PNG', 14, finalY + 15, 60, 30);
-              } catch (e1) {
+              const base64Firma = await convertirUrlABase64(parte.firma);
+              
+              if (base64Firma) {
                   try {
-                      doc.addImage(parte.firma, 'JPEG', 14, finalY + 15, 60, 30);
-                  } catch (e2) {
+                      doc.addImage(base64Firma, 'PNG', 14, finalY + 15, 60, 30);
+                  } catch (e) {
                       doc.setFontSize(8); 
                       doc.setFont("helvetica", "normal");
                       doc.text("(Firma digital registrada en servidor central)", 14, finalY + 20);
                   }
+              } else {
+                  doc.setFontSize(8); 
+                  doc.setFont("helvetica", "normal");
+                  doc.text("(Firma digital registrada en servidor central)", 14, finalY + 20);
               }
           }
 
@@ -211,7 +239,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                   
                   <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>ASIGNACIÓN:</strong> {parte.cuadrilla?.length > 0 ? parte.cuadrilla.map(c=>`${c.nombre} (${c.horas}h n. / ${c.horasExtra||0}h ex.)`).join(' - ') : parte.nombreTrabajador}</div>
                   <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>MATERIAL:</strong> {parte.materialesUsados?.length > 0 ? parte.materialesUsados.map(m=>`${m.cantidad}x ${m.nombre}`).join(' / ') : 'Ninguno'}</div>
-                  <div style={{ fontSize: '12px', color: '#475569', borderLeft: '3px solid #1a1a1a', paddingLeft: '10px', marginTop: '10px' }}><em>"{parte.parte || parte.trabajo || 'Sin observaciones'}"</em></div>
+                  <div style={{ fontSize: '12px', color: '#475569', borderLeft: '3px solid #1a1a1a', paddingLeft: '10px', marginTop: '10px' }}><em>"{parte.trabajo || 'Sin observaciones'}"</em></div>
               </div>
             ))}
           </div>
