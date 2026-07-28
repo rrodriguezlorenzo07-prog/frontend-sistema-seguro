@@ -3,7 +3,7 @@ import { db, storage, auth } from '../firebase';
 import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage'; 
 import { signOut } from 'firebase/auth';
-import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2 } from 'lucide-react';
+import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
@@ -13,11 +13,17 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const [esOtraObra, setEsOtraObra] = useState(false);
   const [obraNombreManual, setObraNombreManual] = useState('');
   
+  // ESTADOS DE TAREAS Y TRABAJO (Modificado para Habitaciones)
   const [trabajoLibre, setTrabajoLibre] = useState('');
-  const [habitacionesRango, setHabitacionesRango] = useState('');
+  const [tareasRealizadas, setTareasRealizadas] = useState([]);
+  const [tareaUbicacion, setTareaUbicacion] = useState('');
+  const [tareaDescripcion, setTareaDescripcion] = useState('');
+
+  // ESTADOS DE MATERIALES
   const [materialesUsados, setMaterialesUsados] = useState([]);
   const [matSelectId, setMatSelectId] = useState('');
   const [matSelectCant, setMatSelectCant] = useState(1);
+  const [matSelectPrecio, setMatSelectPrecio] = useState('');
 
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [vistaMisPartes, setVistaMisPartes] = useState(false);
@@ -53,12 +59,18 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
   const cerrarSesion = () => { signOut(auth).then(() => { window.location.reload(); }); };
 
+  // === LÓGICA DE MATERIALES ===
   const agregarMaterialLista = () => {
       if(!matSelectId || matSelectCant < 1) return;
       const matInfo = inventario.find(m => m.id === matSelectId);
       if(matInfo) {
-          setMaterialesUsados([...materialesUsados, { id: matInfo.id, nombre: matInfo.nombre, cantidad: parseInt(matSelectCant) }]);
-          setMatSelectId(''); setMatSelectCant(1);
+          setMaterialesUsados([...materialesUsados, { 
+              id: matInfo.id, 
+              nombre: matInfo.nombre, 
+              cantidad: parseInt(matSelectCant),
+              precio: parseFloat(matSelectPrecio || 0)
+          }]);
+          setMatSelectId(''); setMatSelectCant(1); setMatSelectPrecio('');
       }
   };
 
@@ -68,29 +80,48 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
       setMaterialesUsados(nuevaLista);
   };
 
+  // === LÓGICA DE TAREAS / HABITACIONES ===
+  const agregarTareaLista = () => {
+      if(!tareaUbicacion.trim() || !tareaDescripcion.trim()) return;
+      setTareasRealizadas([...tareasRealizadas, { 
+          ubicacion: tareaUbicacion.trim(), 
+          descripcion: tareaDescripcion.trim() 
+      }]);
+      setTareaUbicacion(''); setTareaDescripcion('');
+  };
+
+  const quitarTareaLista = (index) => {
+      const nuevaLista = [...tareasRealizadas];
+      nuevaLista.splice(index, 1);
+      setTareasRealizadas(nuevaLista);
+  };
+
+  // === ENVÍO DEL PARTE ===
   const enviarParte = async (e) => {
     e.preventDefault();
+    if (tareasRealizadas.length === 0 && !trabajoLibre.trim()) {
+        setMensaje({ texto: 'DEBES AÑADIR AL MENOS UNA HABITACIÓN O TAREA', tipo: 'error' });
+        setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3000);
+        return;
+    }
+
     setMensaje({ texto: 'ENVIANDO DOCUMENTO...', tipo: 'warning' });
     
     let firmaUrlFinal = null;
     
-    // Si hay firma, la subimos a Firebase Storage de forma obligatoria
     if (!firmaRef.current.isEmpty()) {
         try {
             const base64Firma = firmaRef.current.getCanvas().toDataURL('image/png');
             const nombreArchivo = `firmas/firma_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png`;
             const firmaStorageRef = ref(storage, nombreArchivo);
             
-            // Subimos la imagen al "trastero" de Firebase Storage
             await uploadString(firmaStorageRef, base64Firma, 'data_url');
-            
-            // Obtenemos el enlace web corto y limpio
             firmaUrlFinal = await getDownloadURL(firmaStorageRef);
         } catch (err) {
-            console.error("Error al subir la firma a Storage:", err);
+            console.error("Error al subir firma:", err);
             setMensaje({ texto: 'ERROR AL SUBIR LA FIRMA', tipo: 'error' });
             setTimeout(() => setMensaje({ texto: '', tipo: '' }), 4000);
-            return; // Cortamos el envío si la firma falla
+            return; 
         }
     }
 
@@ -98,10 +129,10 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
     const payloadParte = {
         obra: nombreFinalObra, 
-        habitacionesRango: habitacionesRango, 
-        trabajo: trabajoLibre, 
-        materialesUsados: materialesUsados, 
-        firma: firmaUrlFinal, // <--- Aquí ya viaja solo el enlace web corto (ej: https://firebasestorage...)
+        tareasRealizadas: tareasRealizadas, // Array estructurado: [{ubicacion, descripcion}]
+        trabajo: trabajoLibre,
+        materialesUsados: materialesUsados,
+        firma: firmaUrlFinal, 
         creador: usuario.email, 
         nombreTrabajador: nombreOficial,
         fecha: new Date().toLocaleDateString(), 
@@ -113,8 +144,9 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
     try {
         await addDoc(collection(db, 'partes_de_trabajo'), payloadParte);
         setMensaje({ texto: 'DOCUMENTO ENVIADO CON ÉXITO', tipo: 'success' });
+        
         setObraSeleccionada(null); setEsOtraObra(false); setObraNombreManual('');
-        setTrabajoLibre(''); setHabitacionesRango(''); setMaterialesUsados([]);
+        setTrabajoLibre(''); setTareasRealizadas([]); setMaterialesUsados([]);
         firmaRef.current.clear();
     } catch (error) { 
         setMensaje({ texto: 'ERROR AL ENVIAR EL DOCUMENTO', tipo: 'error' }); 
@@ -130,7 +162,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   return (
     <div style={{ maxWidth: '600px', margin: '40px auto', padding: '0 20px', fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
       
-      {/* NAVEGACIÓN SUPERIOR MINIMALISTA */}
+      {/* NAVEGACIÓN SUPERIOR */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #e5e7eb', paddingBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
         <div style={{ display: 'flex', gap: '10px', flex: 1, minWidth: '200px' }}>
             <button onClick={() => setVistaMisPartes(false)} style={btnStyle(!vistaMisPartes)}><FileText size={16} /> Parte</button>
@@ -156,7 +188,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Lugar de Trabajo</label>
+            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Lugar de Trabajo / Hotel</label>
             <select onChange={(e) => {
                 const val = e.target.value;
                 if(val==='OTRA') { setEsOtraObra(true); setObraSeleccionada(null); }
@@ -169,21 +201,55 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
             {esOtraObra && <input type="text" value={obraNombreManual} onChange={(e) => setObraNombreManual(e.target.value)} required placeholder="Nombre del cliente o proyecto..." style={{ width: '100%', padding: '15px', border: '1px solid #1a1a1a', marginTop: '10px', boxSizing: 'border-box' }} />}
           </div>
 
+          {/* === SECCIÓN MEJORADA DE HABITACIONES Y TAREAS === */}
           <div style={{ padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#fafafa' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}><Package size={16}/> Materiales Utilizados</label>
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                  <select value={matSelectId} onChange={(e)=>setMatSelectId(e.target.value)} style={{ flex: 2, padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
+                  <MapPin size={16}/> Registro por Habitaciones
+              </label>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
+                  <input type="text" placeholder="Ej: Habitación 101 o Pasillo 2" value={tareaUbicacion} onChange={(e) => setTareaUbicacion(e.target.value)} style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
+                  <input type="text" placeholder="Ej: Instalación de puerta de paso" value={tareaDescripcion} onChange={(e) => setTareaDescripcion(e.target.value)} style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
+                  
+                  <button type="button" onClick={agregarTareaLista} style={{ padding: '15px', backgroundColor: '#1a1a1a', color: 'white', border: 'none', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '12px', marginTop: '5px' }}>
+                      <Plus size={16}/> Añadir Habitación / Trabajo
+                  </button>
+              </div>
+
+              {tareasRealizadas.length > 0 && (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {tareasRealizadas.map((t, index) => (
+                          <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', border: '1px solid #1a1a1a', backgroundColor: '#ffffff' }}>
+                              <div>
+                                  <strong style={{ display: 'block', marginBottom: '4px', color: '#1a1a1a', fontSize: '14px' }}>{t.ubicacion}</strong>
+                                  <span style={{ color: '#475569', fontSize: '13px' }}>{t.descripcion}</span>
+                              </div>
+                              <button type="button" onClick={()=>quitarTareaLista(index)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '5px' }}><Trash2 size={18}/></button>
+                          </li>
+                      ))}
+                  </ul>
+              )}
+          </div>
+
+          {/* === SECCIÓN DE MATERIALES (Intacta) === */}
+          <div style={{ padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#fafafa' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}><Package size={16}/> Material Extra Utilizado</label>
+              
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+                  <select value={matSelectId} onChange={(e)=>setMatSelectId(e.target.value)} style={{ flex: 2, minWidth: '150px', padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }}>
                       <option value="">Buscar en inventario...</option>
-                      {inventario.map(m => <option key={m.id} value={m.id}>{m.nombre} (Stock: {m.stock})</option>)}
+                      {inventario.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
                   </select>
-                  <input type="number" value={matSelectCant} onChange={(e)=>setMatSelectCant(e.target.value)} min="1" style={{ flex: 1, padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }} />
+                  <input type="number" placeholder="Cant." value={matSelectCant} onChange={(e)=>setMatSelectCant(e.target.value)} min="1" style={{ width: '70px', padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }} />
+                  <input type="number" placeholder="Precio €" step="0.01" value={matSelectPrecio} onChange={(e)=>setMatSelectPrecio(e.target.value)} style={{ width: '90px', padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }} />
                   <button type="button" onClick={agregarMaterialLista} style={{ padding: '0 20px', backgroundColor: '#1a1a1a', color: 'white', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}><Plus size={18}/></button>
               </div>
+
               {materialesUsados.length > 0 && (
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {materialesUsados.map((m, index) => (
                           <li key={index} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 15px', border: '1px solid #e5e7eb', backgroundColor: '#ffffff', fontSize: '13px' }}>
-                              <span><strong>{m.cantidad}x</strong> {m.nombre}</span>
+                              <span><strong>{m.cantidad}x</strong> {m.nombre} <span style={{ color: '#64748b', marginLeft: '10px' }}>({m.precio.toFixed(2)}€/u &rarr; <strong>{(m.cantidad * m.precio).toFixed(2)}€</strong>)</span></span>
                               <button type="button" onClick={()=>quitarMaterialLista(index)} style={{ color: '#1a1a1a', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={14}/></button>
                           </li>
                       ))}
@@ -192,13 +258,8 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
           </div>
 
           <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}><CheckSquare size={16}/> Habitaciones (Rangos)</label>
-            <input type="text" value={habitacionesRango} onChange={(e) => setHabitacionesRango(e.target.value)} placeholder="Ej: 101, 103-105" style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', backgroundColor: '#fafafa' }} />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Observaciones del Trabajo</label>
-            <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows="3" placeholder="Descripción detallada de la intervención..." style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', backgroundColor: '#fafafa', boxSizing: 'border-box' }} />
+            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Notas Extras / Observaciones Generales</label>
+            <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows="2" placeholder="Información adicional que no encaje en las tareas..." style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', backgroundColor: '#fafafa', boxSizing: 'border-box' }} />
           </div>
 
           <div style={{ padding: '20px', border: '1px solid #1a1a1a' }}>

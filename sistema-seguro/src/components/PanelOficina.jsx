@@ -145,8 +145,23 @@ export default function PanelOficina({ cambiarVista }) {
   };
 
   const generarHotelInteligente = async () => { if(!nuevaObra) { mostrarToast("Introduce un nombre para el proyecto.", "error"); return; } let configs = configHabitaciones.split(',').map(s => parseInt(s.trim()) || 0); let tareasGeneradas = []; for (let p = 1; p <= numPlantas; p++) { let habsEnEstaPlanta = configs[p-1] || configs[0] || 10; for (let h = 1; h <= habsEnEstaPlanta; h++) { let numHab = p * 100 + h; tareasGeneradas.push({ id: `T-${p}-${h}-${Date.now()}`, nombre: `P${p} - Hab ${numHab}`, numeroHabitacion: numHab, completada: false }); } } await addDoc(collection(db, 'obras'), { nombre: nuevaObra, tareas: tareasGeneradas, papelera: false }); setNuevaObra(''); setNumPlantas(1); setConfigHabitaciones('10'); cargarDatos(); mostrarToast("Proyecto creado con éxito."); };
-  const marcarTareaHotel = async (tareaId) => { if(!obraActiva) return; const tareasNuevas = obraActiva.tareas.map(t => t.id === tareaId ? { ...t, completada: !t.completada } : t); await updateDoc(doc(db, 'obras', obraActiva.id), { tareas: tareasNuevas }); setObraActiva({...obraActiva, tareas: tareasNuevas}); cargarDatos(); };
-  const borrarObra = (id) => { pedirConfirmacion("Cerrar Proyecto", "Vas a enviar este hotel a la papelera. Podrás recuperarlo con todo su progreso. ¿Proceder?", async () => { await updateDoc(doc(db, 'obras', id), { papelera: true }); setObraActiva(null); cargarDatos(); mostrarToast("Proyecto en papelera."); }); };
+const marcarTareaHotel = async (tareaIdOArray) => { 
+      if(!obraActiva) return; 
+
+      // 1. Detectamos si nos llega 1 sola habitación o un array (paquete) de varias
+      const idsAModificar = Array.isArray(tareaIdOArray) ? tareaIdOArray : [tareaIdOArray];
+
+      // 2. Modificamos TODAS las habitaciones seleccionadas de golpe en la memoria
+      const tareasNuevas = obraActiva.tareas.map(t => 
+          idsAModificar.includes(t.id) ? { ...t, completada: !t.completada } : t
+      ); 
+
+      // 3. Hacemos UNA SOLA llamada a Firebase enviando la lista ya perfecta
+      await updateDoc(doc(db, 'obras', obraActiva.id), { tareas: tareasNuevas }); 
+      
+      setObraActiva({...obraActiva, tareas: tareasNuevas}); 
+      cargarDatos(); 
+  };  const borrarObra = (id) => { pedirConfirmacion("Cerrar Proyecto", "Vas a enviar este hotel a la papelera. Podrás recuperarlo con todo su progreso. ¿Proceder?", async () => { await updateDoc(doc(db, 'obras', id), { papelera: true }); setObraActiva(null); cargarDatos(); mostrarToast("Proyecto en papelera."); }); };
   const borrarParte = (id) => { pedirConfirmacion("Eliminar Documento", "¿Enviar este albarán a la papelera?", async () => { await updateDoc(doc(db, 'partes_de_trabajo', id), { papelera: true }); cargarDatos(); mostrarToast("Albarán en papelera."); }); };
 
   const agregarMaterial = async () => { if(!nuevoMatNombre || !nuevoMatStock) { mostrarToast("Falta nombre o unidades", "error"); return; } const matExistente = materialesList.find(m => m.nombre.toLowerCase().trim() === nuevoMatNombre.toLowerCase().trim()); if(matExistente) { await updateDoc(doc(db, 'inventario', matExistente.id), { stock: matExistente.stock + parseInt(nuevoMatStock) }); } else { await addDoc(collection(db, 'inventario'), { nombre: nuevoMatNombre.trim(), stock: parseInt(nuevoMatStock) }); } setNuevoMatNombre(''); setNuevoMatStock(''); cargarDatos(); mostrarToast("Inventario actualizado."); };
@@ -181,42 +196,118 @@ export default function PanelOficina({ cambiarVista }) {
   const generarPDFCertificacion = async () => {
       if(!certObraSeleccionada) { mostrarToast("Selecciona un proyecto primero.", "error"); return; }
       if(certPartesSeleccionados.length === 0) { mostrarToast("Selecciona al menos un albarán.", "error"); return; }
+      
       const partesSeleccionadosData = partesHistorial.filter(p => certPartesSeleccionados.includes(p.id));
       const totalHorasCert = partesSeleccionadosData.reduce((acc, p) => acc + (Number(p.horasTotales) || 0), 0);
+      
       try {
-          const pdfDoc = new jsPDF(); pdfDoc.setTextColor(0, 0, 0); pdfDoc.setFontSize(22); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("CERTIFICACIÓN DE OBRA", 14, 25);
+          const pdfDoc = new jsPDF(); 
+          pdfDoc.setTextColor(0, 0, 0); 
+          pdfDoc.setFontSize(22); 
+          pdfDoc.setFont("helvetica", "bold"); 
+          pdfDoc.text("CERTIFICACIÓN DE OBRA", 14, 25);
+          
           const numCert = `CERT-${Date.now().toString().slice(-6).toUpperCase()}`;
-          pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text(`Referencia: ${numCert}`, 14, 33); pdfDoc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 38); pdfDoc.setFontSize(11); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("GestiónPro Software & Maintenance", 196, 25, { align: 'right' }); pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text("Soporte Técnico y Reformas", 196, 31, { align: 'right' }); pdfDoc.setDrawColor(0, 0, 0); pdfDoc.setLineWidth(0.8); pdfDoc.line(14, 45, 196, 45); pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text("PROYECTO / CLIENTE:", 14, 55); pdfDoc.setFontSize(12); pdfDoc.setFont("helvetica", "normal"); pdfDoc.text(certObraSeleccionada, 14, 62);
-          let datosTabla = partesSeleccionadosData.map(p => { let equipo = p.cuadrilla?.length > 0 ? p.cuadrilla.map(c=>c.nombre).join(', ') : p.nombreTrabajador; return [ p.fecha, equipo, p.habitacionesRango || '-', p.horasTotales?.toString() || '0' ]; });
-          autoTable(pdfDoc, { startY: 75, head: [['Fecha', 'Personal Asignado', 'Habitaciones', 'Horas Totales']], body: datosTabla, theme: 'grid', headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold', halign: 'left' }, columnStyles: { 3: { halign: 'center' } }, styles: { fontSize: 10, cellPadding: 6, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.1 }, alternateRowStyles: { fillColor: [245, 245, 245] } });
-          const finalY = (pdfDoc.lastAutoTable ? pdfDoc.lastAutoTable.finalY : 120) + 15; pdfDoc.setFontSize(12); pdfDoc.setFont("helvetica", "bold"); pdfDoc.text(`TOTAL HORAS CERTIFICADAS: ${totalHorasCert}h`, 196, finalY, { align: 'right' }); pdfDoc.setFontSize(8); pdfDoc.setFont("helvetica", "italic"); pdfDoc.setTextColor(80, 80, 80); pdfDoc.text("• Esta certificación agrupa los albaranes de trabajo detallados para su posterior facturación.", 14, 275);
-          const nuevaCert = { obra: certObraSeleccionada, partesIds: certPartesSeleccionados, referencia: numCert, totalHoras: totalHorasCert, fecha: new Date().toLocaleDateString(), timestamp: Date.now(), facturado: false, papelera: false };
+          
+          pdfDoc.setFontSize(10); 
+          pdfDoc.setFont("helvetica", "normal"); 
+          pdfDoc.text(`Referencia: ${numCert}`, 14, 33); 
+          pdfDoc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 38); 
+          
+          pdfDoc.setFontSize(11); 
+          pdfDoc.setFont("helvetica", "bold"); 
+          pdfDoc.text("GestiónPro Software & Maintenance", 196, 25, { align: 'right' }); 
+          pdfDoc.setFontSize(10); 
+          pdfDoc.setFont("helvetica", "normal"); 
+          pdfDoc.text("Soporte Técnico y Reformas", 196, 31, { align: 'right' }); 
+          
+          pdfDoc.setDrawColor(0, 0, 0); 
+          pdfDoc.setLineWidth(0.8); 
+          pdfDoc.line(14, 45, 196, 45); 
+          
+          pdfDoc.setFontSize(10); 
+          pdfDoc.setFont("helvetica", "bold"); 
+          pdfDoc.text("PROYECTO / HOTEL:", 14, 55); 
+          pdfDoc.setFontSize(12); 
+          pdfDoc.setFont("helvetica", "normal"); 
+          pdfDoc.text(certObraSeleccionada, 14, 62);
+
+          // REGLA 1: Desglose diario detallado con Tareas/Habitaciones (sin referencias a precios de materiales)
+          let datosTabla = [];
+          partesSeleccionadosData.forEach(p => {
+            const equipo = p.cuadrilla?.length > 0 ? p.cuadrilla.map(c => `${c.nombre} (${c.horas}h)`).join(', ') : (p.nombreTrabajador || 'Sin asignar');
+            
+            // Formatear las tareas o habitaciones realizadas en ese parte
+            let textoTareas = '';
+            if (p.tareasRealizadas && p.tareasRealizadas.length > 0) {
+              textoTareas = p.tareasRealizadas.map(t => `• [${t.ubicacion}]: ${t.descripcion}`).join('\n');
+            } else {
+              textoTareas = p.trabajo || p.habitacionesRango || 'Sin especificar';
+            }
+
+            datosTabla.push([
+              p.fecha || '',
+              equipo,
+              textoTareas,
+              `${p.horasTotales?.toString() || '0'}h`
+            ]);
+          });
+
+          autoTable(pdfDoc, { 
+            startY: 75, 
+            head: [['Fecha', 'Personal Asignado', 'Habitaciones y Tareas Realizadas', 'Horas']], 
+            body: datosTabla, 
+            theme: 'grid', 
+            headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold', halign: 'left' }, 
+            columnStyles: { 3: { halign: 'center' } }, 
+            styles: { fontSize: 9, cellPadding: 5, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.1, overflow: 'linebreak' }, 
+            alternateRowStyles: { fillColor: [245, 245, 245] } 
+          });
+
+          const finalY = (pdfDoc.lastAutoTable ? pdfDoc.lastAutoTable.finalY : 120) + 15; 
+          pdfDoc.setFontSize(12); 
+          pdfDoc.setFont("helvetica", "bold"); 
+          pdfDoc.text(`TOTAL HORAS CERTIFICADAS: ${totalHorasCert} h`, 196, finalY, { align: 'right' }); 
+          
+          pdfDoc.setFontSize(8); 
+          pdfDoc.setFont("helvetica", "italic"); 
+          pdfDoc.setTextColor(80, 80, 80); 
+          pdfDoc.text("• Certificación de trabajos ejecutados para control de administración y facturación del contrato.", 14, 275);
+          
+          const nuevaCert = { obra: certObraSeleccionada, partesIds: certPartesSeleccionados, referencia: numCert, totalHoras: totalHorasCert, fecha: new Date().toLocaleDateString(), timestamp: Date.now(), facturado: false, papelera: false, albaranes: partesSeleccionadosData };
           const docRef = await addDoc(collection(db, 'certificaciones'), nuevaCert);
-          for (let id of certPartesSeleccionados) { await updateDoc(doc(db, 'partes_de_trabajo', id), { certificado: true, idCertificacion: docRef.id }); }
-          setCertPartesSeleccionados([]); setCertObraSeleccionada(''); cargarDatos(); pdfDoc.save(`Certificacion_${certObraSeleccionada.replace(/[^a-zA-Z0-9]/g, '_')}_${numCert}.pdf`); mostrarToast("Certificación generada y bloqueada.");
-      } catch (error) { console.error(error); mostrarToast(`Fallo al generar PDF`, "error"); }
+          
+          for (let id of certPartesSeleccionados) { 
+            await updateDoc(doc(db, 'partes_de_trabajo', id), { certificado: true, idCertificacion: docRef.id }); 
+          }
+          
+          setCertPartesSeleccionados([]); 
+          setCertObraSeleccionada(''); 
+          cargarDatos(); 
+          pdfDoc.save(`Certificacion_${certObraSeleccionada.replace(/[^a-zA-Z0-9]/g, '_')}_${numCert}.pdf`); 
+          mostrarToast("Certificación generada y bloqueada.");
+      } catch (error) { 
+        console.error(error); 
+        mostrarToast(`Fallo al generar PDF`, "error"); 
+      }
   };
 
   const borrarCertificacion = (id, partesIds) => { pedirConfirmacion("Anular Certificación", "Al anular, los albaranes quedan libres. La certificación irá a la papelera.", async () => { await updateDoc(doc(db, 'certificaciones', id), { papelera: true }); for (let pId of partesIds) { await updateDoc(doc(db, 'partes_de_trabajo', pId), { certificado: false, idCertificacion: null }); } cargarDatos(); mostrarToast("Certificación en la papelera."); }); };
   const toggleItemFacturacion = (id) => { setItemsAFacturar(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 const generarPDFFactura = async (e) => {
-      // 0. EL FRENO DE MANO: Evita que el navegador recargue la página al pulsar el botón
       if (e) e.preventDefault();
 
-      // 1. Validar que hay nombre de cliente
       if (!facturaCliente || facturaCliente.trim() === '') {
           alert("¡Error! Es obligatorio introducir el nombre o razón social del cliente.");
           return;
       }
 
-      // 2. Validar que hay elementos seleccionados
       if (!itemsAFacturar || itemsAFacturar.length === 0) {
           alert("Por favor, selecciona al menos un albarán o certificación para facturar.");
           return;
       }
 
       const tarifa = parseFloat(facTarifaHora) || 0;
-      const matExtra = parseFloat(facImporteMateriales) || 0;
       const clienteFinal = facturaCliente.trim();
 
       try {
@@ -240,38 +331,100 @@ const generarPDFFactura = async (e) => {
 
           let cuerpoTabla = [];
           let totalHorasGlobal = 0;
+          let acumuladorMateriales = {};
+          let totalPartidasLibres = 0; // NUEVO: Acumulador para las certificaciones valoradas
 
+          // REGLA 2: Recopilar datos dependiendo de si vienen de albaranes, horas o dinero cerrado
           if (modoFacturacion === 'albaranes') {
               const albaranesSeleccionados = partesHistorial.filter(p => itemsAFacturar.includes(p.id));
               albaranesSeleccionados.forEach(p => {
                   const horas = parseFloat(p.horasTotales || p.horas || 0);
                   totalHorasGlobal += horas;
-                  cuerpoTabla.push([
-                      `Albarán: ${p.obra || 'General'} (${p.fecha || ''})`,
-                      `${horas}h`,
-                      `${(horas * tarifa).toFixed(2)} €`
-                  ]);
+
+                  if (p.materialesUsados && p.materialesUsados.length > 0) {
+                    p.materialesUsados.forEach(m => {
+                      const clave = m.nombre.toLowerCase().trim();
+                      const precioU = parseFloat(m.precio || 0);
+                      const cant = parseFloat(m.cantidad || 0);
+                      if (!acumuladorMateriales[clave]) {
+                        acumuladorMateriales[clave] = { nombre: m.nombre, cantidad: 0, precio: precioU };
+                      }
+                      acumuladorMateriales[clave].cantidad += cant;
+                    });
+                  }
               });
           } else {
               const certificacionesSeleccionadas = certificacionesList.filter(c => itemsAFacturar.includes(c.id));
               certificacionesSeleccionadas.forEach(c => {
-                  const horas = parseFloat(c.totalHoras || 0);
-                  totalHorasGlobal += horas;
-                  cuerpoTabla.push([
-                      `Certificación REF: ${c.referencia || ''} - Obra: ${c.obra || ''}`,
-                      `${horas}h`,
-                      `${(horas * tarifa).toFixed(2)} €`
-                  ]);
+                  
+                  // SI ES UNA CERTIFICACIÓN LIBRE (DINERO CERRADO)
+                  if (c.modo === 'libre') {
+                      if (c.partidas) {
+                          c.partidas.forEach(p => {
+                              const totalPartida = p.cantidad * p.precio;
+                              totalPartidasLibres += totalPartida;
+                              cuerpoTabla.push([
+                                  `[Certificación] - ${p.concepto} (${p.precio.toFixed(2)} €/u)`,
+                                  `${p.cantidad} uds`,
+                                  `${totalPartida.toFixed(2)} €`
+                              ]);
+                          });
+                      }
+                  } else {
+                      // SI ES UNA CERTIFICACIÓN DE ALBARANES (HORAS Y MATERIALES)
+                      const horas = parseFloat(c.totalHoras || 0);
+                      totalHorasGlobal += horas;
+
+                      if (c.albaranes) {
+                          c.albaranes.forEach(p => {
+                              if (p.materialesUsados) {
+                                  p.materialesUsados.forEach(m => {
+                                      const clave = m.nombre.toLowerCase().trim();
+                                      const precioU = parseFloat(m.precio || 0);
+                                      const cant = parseFloat(m.cantidad || 0);
+                                      if (!acumuladorMateriales[clave]) {
+                                          acumuladorMateriales[clave] = { nombre: m.nombre, cantidad: 0, precio: precioU };
+                                      }
+                                      acumuladorMateriales[clave].cantidad += cant;
+                                  });
+                              }
+                          });
+                      }
+                  }
               });
           }
 
-          if (matExtra > 0) {
-              cuerpoTabla.push(['Materiales y Suministros Extra', '1 ud', `${matExtra.toFixed(2)} €`]);
+          // Añadir línea de Mano de Obra (Solo si hay horas registradas)
+          if (totalHorasGlobal > 0) {
+              const subtotalManoObra = totalHorasGlobal * tarifa;
+              cuerpoTabla.push([
+                  `Mano de Obra / Servicios (${totalHorasGlobal}h a ${tarifa.toFixed(2)} €/h)`,
+                  `${totalHorasGlobal}h`,
+                  `${subtotalManoObra.toFixed(2)} €`
+              ]);
+          }
+
+          // Añadir filas de materiales reales desglosados (Solo si hubo albaranes)
+          let totalMaterialesCalculado = 0;
+          Object.values(acumuladorMateriales).forEach(mat => {
+              const subtotalMat = mat.cantidad * mat.precio;
+              totalMaterialesCalculado += subtotalMat;
+              cuerpoTabla.push([
+                  `Material Suministrado: ${mat.nombre} (${mat.precio.toFixed(2)} €/u)`,
+                  `${mat.cantidad} uds`,
+                  `${subtotalMat.toFixed(2)} €`
+              ]);
+          });
+
+          // Soporte por si se introdujo un importe manual extra
+          const matExtraManual = parseFloat(facImporteMateriales) || 0;
+          if (matExtraManual > 0) {
+              cuerpoTabla.push(['Suministros o Conceptos Extra (Varios)', '1 ud', `${matExtraManual.toFixed(2)} €`]);
           }
 
           autoTable(docPdf, {
               startY: 60,
-              head: [['Concepto / Descripción', 'Cantidad / Horas', 'Importe']],
+              head: [['Concepto / Descripción', 'Cantidad', 'Importe']],
               body: cuerpoTabla,
               theme: 'grid',
               headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold' },
@@ -279,14 +432,15 @@ const generarPDFFactura = async (e) => {
           });
 
           let finalY = docPdf.lastAutoTable.finalY + 15;
-          const subtotalHoras = totalHorasGlobal * tarifa;
-          const totalGeneral = subtotalHoras + matExtra;
+          const subtotalManoObra = totalHorasGlobal * tarifa;
+          
+          // EL TOTAL AHORA SUMA TAMBIÉN LAS PARTIDAS LIBRES
+          const totalGeneral = subtotalManoObra + totalMaterialesCalculado + matExtraManual + totalPartidasLibres;
 
           docPdf.setFontSize(11);
           docPdf.setFont("helvetica", "bold");
           docPdf.text(`TOTAL A PAGAR: ${totalGeneral.toFixed(2)} €`, 196, finalY, { align: 'right' });
 
-          // 3. Guardar la factura en Firestore y guardar la referencia
           const nuevaFacturaData = {
               referencia: referenciaFac,
               cliente: clienteFinal,
@@ -298,9 +452,7 @@ const generarPDFFactura = async (e) => {
           };
           const docRef = await addDoc(collection(db, 'facturas'), nuevaFacturaData);
 
-          // 4. BLOQUEAR ELEMENTOS EN FIRESTORE (Marcar facturado: true)
           const nombreColeccion = modoFacturacion === 'albaranes' ? 'partes_de_trabajo' : 'certificaciones';
-          
           for (const idItem of itemsAFacturar) {
               const refItem = doc(db, nombreColeccion, idItem);
               await updateDoc(refItem, { facturado: true });
@@ -308,14 +460,10 @@ const generarPDFFactura = async (e) => {
 
           docPdf.save(`Factura_${referenciaFac}.pdf`);
           
-          // ---> LA MAGIA VISUAL: ACTUALIZAMOS LA PANTALLA AL INSTANTE <---
-          
-          // Añadimos la factura a la lista visual de abajo
           if (typeof setFacturasList === 'function') {
               setFacturasList(prev => [{ id: docRef.id, ...nuevaFacturaData }, ...prev]);
           }
 
-          // Descontamos las certificaciones o albaranes para que desaparezcan en el acto
           if (modoFacturacion === 'certificaciones') {
               if (typeof setCertificacionesList === 'function') {
                   setCertificacionesList(prev => prev.map(c => itemsAFacturar.includes(c.id) ? { ...c, facturado: true } : c));
@@ -328,7 +476,6 @@ const generarPDFFactura = async (e) => {
 
           alert("¡Factura emitida y elementos bloqueados con éxito!");
 
-          // 5. Limpiar selección y formulario
           setItemsAFacturar([]);
           setFacturaCliente('');
           setFacTarifaHora('');
@@ -338,7 +485,6 @@ const generarPDFFactura = async (e) => {
           console.error("Error al emitir factura:", error);
           alert("Error al emitir la factura: " + error.message);
       }
-  
   };
 
 const borrarFactura = (factura) => { 
