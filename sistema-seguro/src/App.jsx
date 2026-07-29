@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from './firebase'; 
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { Menu, X, ArrowRight, ShieldCheck, ArrowLeft, LogOut, FileText, Building2 } from 'lucide-react';
 
 import PanelOficina from './components/PanelOficina';
@@ -12,7 +12,6 @@ export default function App() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     
-    // ESTADOS NUEVOS PARA EL REGISTRO DESDE EL MÓVIL
     const [esRegistro, setEsRegistro] = useState(false);
     const [nombreRegistro, setNombreRegistro] = useState('');
 
@@ -33,27 +32,48 @@ export default function App() {
         return () => window.removeEventListener('resize', manejarResize);
     }, []);
 
-    const CORREOS_ADMIN = [
-        "rrodriguezlorenzo02@gmail.com", 
-        "el_correo_de_tu_padre@gmail.com"
-    ];
-
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (usuario) => {
             if (usuario) {
-                const isAdminCheck = CORREOS_ADMIN.includes(usuario.email);
-                setEsAdmin(isAdminCheck);
-                
+                let esAdminDB = false;
+                let nombreDB = usuario.email;
+
                 try {
-                    const docRef = await getDoc(doc(db, 'usuarios', usuario.uid));
-                    if (docRef.exists()) { setNombreUsuario(docRef.data().nombre); } 
-                    else { setNombreUsuario(usuario.email); }
-                } catch (error) { console.error(error); }
+                    // 1. Buscamos al trabajador en la base de datos por su email
+                    const q = query(collection(db, 'trabajadores'), where("email", "==", usuario.email));
+                    const querySnapshot = await getDocs(q);
+                    
+                    if (!querySnapshot.empty) {
+                        const datosTrabajador = querySnapshot.docs[0].data();
+                        nombreDB = datosTrabajador.nombre;
+                        
+                        // Si en la base de datos es admin, le damos paso
+                        if (datosTrabajador.rol === 'admin') {
+                            esAdminDB = true;
+                        }
+                    } else {
+                        // Respaldo por si todavía usas la antigua colección 'usuarios'
+                        const docRef = await getDoc(doc(db, 'usuarios', usuario.uid));
+                        if (docRef.exists()) { nombreDB = docRef.data().nombre; } 
+                    }
+
+                    // 2. SALVAVIDAS MAESTRO: Si es tu correo, SIEMPRE serás admin por seguridad
+                    if (usuario.email === "rrodriguezlorenzo02@gmail.com" || usuario.email === "el_correo_de_tu_padre@gmail.com") {
+                        esAdminDB = true;
+                    }
+
+                    setNombreUsuario(nombreDB);
+                    setEsAdmin(esAdminDB);
+                } catch (error) { 
+                    console.error("Error al verificar rol: ", error); 
+                }
                 
-                setSesionIniciada(true); setUsuarioLogueado(usuario);
-                setVistaActiva(isAdminCheck ? 'oficina' : 'redactar');
+                setSesionIniciada(true); 
+                setUsuarioLogueado(usuario);
+                setVistaActiva(esAdminDB ? 'oficina' : 'redactar');
             } else {
-                setSesionIniciada(false); setUsuarioLogueado(null);
+                setSesionIniciada(false); 
+                setUsuarioLogueado(null);
             }
         });
         return () => unsubscribe();
@@ -63,11 +83,9 @@ export default function App() {
         evento.preventDefault();
         try {
             if (esRegistro) {
-                // Si está en modo registro, crea la cuenta
                 await createUserWithEmailAndPassword(auth, email, password);
                 setErrorLogin('');
             } else {
-                // Si no, inicia sesión
                 await signInWithEmailAndPassword(auth, email, password);
                 setErrorLogin('');
             }
@@ -158,7 +176,7 @@ export default function App() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '30px' }}>
                         <div style={{ textAlign: 'right' }}>
                             <div style={{ color: '#1a1a1a', fontWeight: 'bold', fontSize: '12px', letterSpacing: '1px', textTransform: 'uppercase' }}>{nombreUsuario}</div>
-                            <div style={{ color: '#64748b', fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' }}>{esAdmin ? 'Administrador' : 'Operario'}</div>
+                            <div style={{ color: '#2563eb', fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', fontWeight: 'bold' }}>{esAdmin ? 'Administrador' : 'Operario'}</div>
                         </div>
                         <button onClick={cerrarSesion} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', backgroundColor: 'transparent', color: '#1a1a1a', border: '1px solid #1a1a1a', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' }}><LogOut size={14} /> Salir</button>
                     </div>

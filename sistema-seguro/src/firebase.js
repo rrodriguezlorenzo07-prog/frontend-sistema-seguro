@@ -21,6 +21,7 @@ export const storage = getStorage(app);
 const appSecundaria = initializeApp(firebaseConfig, "AppSecundaria");
 export const authSecundario = getAuth(appSecundaria);
 
+// 👇 MODO OFFLINE PARA ZONAS SIN COBERTURA 👇
 enableIndexedDbPersistence(db).catch((err) => {
     if (err.code == 'failed-precondition') {
         console.log("Múltiples pestañas abiertas, offline desactivado.");

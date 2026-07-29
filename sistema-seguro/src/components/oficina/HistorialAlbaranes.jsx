@@ -3,7 +3,7 @@ import { FileSpreadsheet, Eye, Download, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportarPartesExcel, labelStyle, inputStyle, fechaInicio, setFechaInicio, fechaFin, setFechaFin, filtroBuscador, setFiltroBuscador, setLimitePartes, ordenPartes, setOrdenPartes, partesAMostrar }) {
+export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportarPartesExcel, labelStyle, inputStyle, fechaInicio, setFechaInicio, fechaFin, setFechaFin, filtroBuscador, setFiltroBuscador, setLimitePartes, ordenPartes, setOrdenPartes, partesAMostrar, cargarMasPartes, hayMasPartes, cargandoMas, buscarPartesPorFechas }) {
   
   const [partePreview, setPartePreview] = useState(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
@@ -55,14 +55,11 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
           let finalY = 95;
 
-          // 1. NUEVA TABLA DE MATERIALES CON PRECIO
           if (parte.materialesUsados && parte.materialesUsados.length > 0) {
               let datosMat = parte.materialesUsados.map(m => {
                   const p = parseFloat(m.precio || 0); const c = parseFloat(m.cantidad || 0);
                   return [String(c), String(m.nombre || ''), `${p.toFixed(2)} €`, `${(c*p).toFixed(2)} €`];
               });
-              
-              // Fila de total
               const totalMat = parte.materialesUsados.reduce((sum, m) => sum + (parseFloat(m.cantidad||0) * parseFloat(m.precio||0)), 0);
               datosMat.push(['', '', 'TOTAL:', `${totalMat.toFixed(2)} €`]);
 
@@ -75,7 +72,6 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
               finalY = doc.lastAutoTable.finalY + 15;
           }
 
-          // 2. NUEVA ESTRUCTURA DE TAREAS Y HABITACIONES
           doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text("TAREAS Y HABITACIONES:", 14, finalY);
           doc.setFontSize(10); doc.setFont("helvetica", "normal"); finalY += 8;
 
@@ -85,22 +81,18 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                   doc.text(textoTarea, 14, finalY); finalY += (textoTarea.length * 6);
               });
           } else {
-              // Compatibilidad hacia atrás para partes viejos
               const notas = doc.splitTextToSize(String(parte.trabajo || 'Sin observaciones.'), 180);
               doc.text(notas, 14, finalY); finalY += (notas.length * 6);
           }
           finalY += 10;
 
-          // FIRMA INTACTA
           if (parte.firma) {
               doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text("FIRMA DE CONFORMIDAD:", 14, finalY);
               const base64Firma = await convertirUrlABase64(parte.firma);
               if (base64Firma) {
                   try { doc.addImage(base64Firma, 'PNG', 14, finalY + 5, 60, 30); } 
                   catch (e) { doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.text("(Firma digital registrada en servidor central)", 14, finalY + 15); }
-              } else {
-                  doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.text("(Firma digital registrada en servidor central)", 14, finalY + 15);
-              }
+              } else { doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.text("(Firma digital registrada en servidor central)", 14, finalY + 15); }
           }
 
           doc.save(`Albaran_${String(parte.obra || 'General').replace(/[^a-zA-Z0-9]/g, '_')}_${numAlbaran}.pdf`);
@@ -110,7 +102,6 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
   return (
       <div style={blockStyle}>
-          {/* NUEVO MODAL DE VISTA PREVIA DETALLADA (Albarán) */}
           {partePreview && (
               <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000, padding: '20px', boxSizing: 'border-box' }}>
                   <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '600px', maxHeight: '90vh', minHeight: '600px', overflowY: 'auto', border: '1px solid #1a1a1a', display: 'flex', flexDirection: 'column' }}>
@@ -129,7 +120,6 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                                <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #1a1a1a' }}>{partePreview.cuadrilla?.length > 0 ? partePreview.cuadrilla.map(c=>`${c.nombre} (${c.horas}h)`).join(' - ') : partePreview.nombreTrabajador}</p>
                            </div>
 
-                           {/* MATERIALES CON PRECIO */}
                            {partePreview.materialesUsados && partePreview.materialesUsados.length > 0 && (
                                <div style={{ marginBottom: '20px' }}>
                                    <p style={{ margin: '0 0 5px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Material Empleado y Costes</p>
@@ -147,7 +137,6 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                                </div>
                            )}
 
-                           {/* TAREAS Y HABITACIONES */}
                            <div style={{ marginBottom: '20px' }}>
                                <p style={{ margin: '0 0 5px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Tareas y Habitaciones</p>
                                {partePreview.tareasRealizadas && partePreview.tareasRealizadas.length > 0 ? (
@@ -181,18 +170,23 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
               </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}><h3 style={{ margin: 0, fontSize: '18px', fontWeight: '300', letterSpacing: '2px', textTransform: 'uppercase' }}>Albaranes / Historial</h3><button onClick={exportarPartesExcel} style={{ ...btnBlackStyle, backgroundColor: '#ffffff', color: '#1a1a1a', border: '1px solid #1a1a1a' }}><FileSpreadsheet size={14} /> Exportar BBDD</button></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '300', letterSpacing: '2px', textTransform: 'uppercase' }}>Albaranes / Historial</h3>
+              <button onClick={exportarPartesExcel} style={{ ...btnBlackStyle, backgroundColor: '#ffffff', color: '#1a1a1a', border: '1px solid #1a1a1a' }}><FileSpreadsheet size={14} /> Exportar BBDD</button>
+          </div>
           
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={{ flex: 1, minWidth: '150px' }}><label style={labelStyle}>Desde:</label><input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} style={inputStyle} /></div>
               <div style={{ flex: 1, minWidth: '150px' }}><label style={labelStyle}>Hasta:</label><input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} style={inputStyle} /></div>
+              {/* BOTON BUSCAR EN FECHAS */}
+              <button onClick={buscarPartesPorFechas} style={{ ...btnBlackStyle, flex: 1, minWidth: '150px', justifyContent: 'center', height: '42px' }}>Buscar en BD</button>
           </div>
+          
           <div style={{ display: 'flex', gap: '10px', marginBottom: '25px' }}>
-              <input type="text" placeholder="Término de búsqueda..." value={filtroBuscador} onChange={(e) => { setFiltroBuscador(e.target.value); setLimitePartes(50); }} style={{...inputStyle, flex: 2}} />
+              <input type="text" placeholder="Filtro rápido (sobre cargados)..." value={filtroBuscador} onChange={(e) => { setFiltroBuscador(e.target.value); setLimitePartes(50); }} style={{...inputStyle, flex: 2}} />
               <select value={ordenPartes} onChange={(e) => setOrdenPartes(e.target.value)} style={{...inputStyle, flex: 1, cursor: 'pointer'}}><option value="recientes">Más recientes</option><option value="antiguos">Más antiguos</option></select>
           </div>
           
-          {/* Scroll infinito */}
           <div onScroll={(e) => { if (filtroBuscador !== '' || fechaInicio !== '' || fechaFin !== '') return; const { scrollTop, clientHeight, scrollHeight } = e.currentTarget; if (scrollHeight - scrollTop <= clientHeight + 30) setLimitePartes(prev => prev + 10); }} style={{ maxHeight: '450px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px', paddingRight: '5px' }}>
               {partesAMostrar.length === 0 ? <div style={{ fontSize: '12px', color: '#64748b', padding: '20px', textAlign: 'center', backgroundColor: '#fafafa', border: '1px dashed #cbd5e1' }}>No se han encontrado albaranes.</div> : (
                   <>
@@ -212,7 +206,16 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                             <div style={{ fontSize: '12px', color: '#475569', borderLeft: '3px solid #1a1a1a', paddingLeft: '10px', marginTop: '10px' }}><em>{parte.tareasRealizadas?.length > 0 ? parte.tareasRealizadas.map(t => `${t.ubicacion}: ${t.descripcion}`).join(' | ') : (parte.trabajo || 'Sin observaciones')}</em></div>
                         </div>
                       ))}
-                      {!filtroBuscador && !fechaInicio && !fechaFin && <div onClick={() => setLimitePartes(prev => prev + 10)} style={{ padding: '12px', backgroundColor: '#fafafa', textAlign: 'center', fontSize: '10px', color: '#64748b', cursor: 'pointer', border: '1px dashed #cbd5e1' }}>Desliza hacia abajo o pulsa aquí para cargar más...</div>}
+                      
+                      {hayMasPartes && (
+                          <button 
+                              onClick={cargarMasPartes} 
+                              disabled={cargandoMas}
+                              style={{ width: '100%', padding: '15px', backgroundColor: '#fafafa', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: '#1a1a1a', cursor: 'pointer', border: '1px dashed #cbd5e1', textTransform: 'uppercase' }}
+                          >
+                              {cargandoMas ? 'Descargando...' : '↓ Descargar más albaranes antiguos ↓'}
+                          </button>
+                      )}
                   </>
               )}
           </div>
