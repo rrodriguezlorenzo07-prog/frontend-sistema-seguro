@@ -4,17 +4,44 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken'); 
 const { Pool } = require('pg'); 
 
-// Borra la configuración vieja (la que tenía localhost y tu clave de pgAdmin)
-// Y pon esta nueva configuración para la nube:
+// ---------------------------------------------------
+// CONFIGURACIÓN SECRETA
+//
+// Nada de esto vive en el código. Antes sí, y acabó publicado: la contraseña
+// de la base de datos y la firma de los tokens se leían entrando al
+// repositorio en GitHub. Ahora vienen del entorno, y el servidor no arranca
+// sin ellas: sin valor por defecto no hay forma de que una clave vuelva a
+// colarse en un commit sin que nadie se entere.
+//
+// Dónde se ponen:
+//   Render  ->  panel del servicio -> Environment -> Add Environment Variable
+//   Local   ->  node --env-file=.env server.js   (el .env nunca se sube)
+// ---------------------------------------------------
+const { DATABASE_URL, JWT_SECRET } = process.env;
+
+const faltan = [
+    !DATABASE_URL && 'DATABASE_URL',
+    !JWT_SECRET && 'JWT_SECRET',
+].filter(Boolean);
+
+if (faltan.length > 0) {
+    console.error(
+        '\nFaltan variables de entorno: ' + faltan.join(', ') + '\n' +
+        'El servidor no arranca sin ellas.\n'
+    );
+    process.exit(1);
+}
+
+// Configuración de la base de datos en la nube.
 
 const db = new Pool({
-    connectionString: 'postgresql://neondb_owner:npg_OSb18YnDlBVp@ep-noisy-voice-zadofynu-pooler.c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
+    connectionString: DATABASE_URL,
     ssl: {
         rejectUnauthorized: false // Obligatorio para conexiones seguras en la nube
     }
 });
 
-const FIRMA_SECRETA = 'mi_super_secreto_de_ingenieria_2026';
+const FIRMA_SECRETA = JWT_SECRET;
 
 const app = express();
 app.use(cors());
