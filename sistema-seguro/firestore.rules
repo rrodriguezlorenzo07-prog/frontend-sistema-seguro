@@ -61,8 +61,7 @@ service cloud.firestore {
 
       // Lo que la oficina escribe al validar (PanelOficina.jsx:251).
       function camposDeValidacion() {
-        return ['estado', 'cuadrilla', 'horasExtraAsignadas', 'fechaValidacion',
-                'certificado', 'facturado', 'papelera'];
+        return ['estado', 'fechaValidacion', 'certificado', 'facturado', 'papelera'];
       }
 
       // ÚNICA excepción a la inmutabilidad de un parte aprobado: ciclo documental.
