@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
@@ -15,19 +15,15 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Caché persistente en IndexedDB para trabajar en obra sin cobertura.
+// Sustituye a enableIndexedDbPersistence, deprecado; el gestor multipestaña
+// evita además el error failed-precondition al abrir la app en varias pestañas.
+export const db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
 
 // 👇 ESTO PERMITE AL ADMIN CREAR CUENTAS DE TRABAJADORES CON CONTRASEÑA 👇
 const appSecundaria = initializeApp(firebaseConfig, "AppSecundaria");
 export const authSecundario = getAuth(appSecundaria);
-
-// 👇 MODO OFFLINE PARA ZONAS SIN COBERTURA 👇
-enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code == 'failed-precondition') {
-        console.log("Múltiples pestañas abiertas, offline desactivado.");
-    } else if (err.code == 'unimplemented') {
-        console.log("Navegador sin soporte offline.");
-    }
-});

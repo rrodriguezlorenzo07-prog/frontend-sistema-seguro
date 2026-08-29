@@ -1,0 +1,94 @@
+// =============================================================================
+// PROPUESTA Fase D.2 — NO DESPLEGADO, NO INCLUIDO EN firestore.rules
+//
+// Aísla los datos de validación (cuadrilla y horas extra por operario) fuera del
+// documento del parte, para que el operario pueda seguir leyendo SU parte sin ver
+// las horas extra de sus compañeros.
+//
+// Las reglas de Firestore autorizan documentos enteros, nunca campos sueltos: por
+// eso este problema no se resuelve con reglas sobre partes_de_trabajo, sino
+// sacando el dato a otro documento.
+//
+// Se incluyen las DOS formas. La recomendada es la A.
+// =============================================================================
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPCIÓN A (RECOMENDADA): colección de primer nivel con el MISMO id que el parte
+//
+//   validaciones/{parteId}  ->  { cuadrilla: [...], horasExtraAsignadas, timestamp,
+//                                 obra, fechaValidacion }
+//
+// Ventajas sobre la subcolección:
+//   1. Cargar la validación de una página de 300 partes es UNA consulta ordinaria
+//      con orderBy + limit. Con subcolección haría falta una consulta de grupo de
+//      colecciones (collectionGroup), que exige un índice de grupo -> otro deploy.
+//   2. El cruce es por id: Map de validaciones y join O(1) contra los partes.
+//   3. Firestore NO borra las subcolecciones al borrar el documento padre, así que
+//      la subcolección tampoco aporta limpieza en cascada. No se pierde nada.
+//   4. Reglas más simples de auditar: un solo match, sin comodín recursivo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+match /validaciones/{parteId} {
+  // Solo oficina, en lectura y en escritura. El creador del parte NO entra aquí,
+  // ni siquiera para su propio parte: es justo lo que se quiere impedir.
+  allow read: if esAdmin();
+
+  // Se crea al aprobar y se puede corregir mientras el parte siga en oficina.
+  allow create, update: if esAdmin()
+                        && request.resource.data.keys().hasAll(['cuadrilla', 'horasExtraAsignadas'])
+                        && request.resource.data.cuadrilla is list
+                        && request.resource.data.horasExtraAsignadas is number;
+
+  // Solo se elimina al destruir el parte definitivamente desde la papelera.
+  allow delete: if esAdmin();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPCIÓN B: subcolección, tal y como la planteaste
+//
+//   partes_de_trabajo/{parteId}/validacion/datos
+//
+// Nota sobre el id fijo `datos`: usar un id autogenerado obligaría a hacer una
+// consulta para encontrar el documento. Con id fijo es un get() por ruta directa,
+// idempotente y sin índices.
+//
+// Si se elige esta opción hacen falta LOS DOS bloques: el segundo es el que
+// habilita la consulta de grupo de colecciones, sin la cual habría que leer las
+// 300 subcolecciones una a una.
+// ─────────────────────────────────────────────────────────────────────────────
+
+match /partes_de_trabajo/{parteId}/validacion/{docId} {
+  allow read: if esAdmin();
+  allow create, update: if esAdmin()
+                        && request.resource.data.keys().hasAll(['cuadrilla', 'horasExtraAsignadas']);
+  allow delete: if esAdmin();
+}
+
+// Necesario para getDocs(query(collectionGroup(db, 'validacion'), ...)).
+// Requiere además un índice de grupo de colecciones sobre `timestamp`.
+match /{ruta=**}/validacion/{docId} {
+  allow read: if esAdmin();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAMBIO OBLIGATORIO en el bloque YA DESPLEGADO de partes_de_trabajo
+//
+// Sin esto, la oficina podría seguir escribiendo cuadrilla y horasExtraAsignadas
+// dentro del documento del parte y el agujero de privacidad seguiría abierto.
+//
+// En firestore.rules, dentro de match /partes_de_trabajo/{parteId}, la función
+// camposDeValidacion() debe pasar de:
+//
+//     return ['estado', 'cuadrilla', 'horasExtraAsignadas', 'fechaValidacion',
+//             'certificado', 'facturado', 'papelera'];
+// a:
+//     return ['estado', 'fechaValidacion', 'certificado', 'facturado', 'papelera'];
+//
+// ATENCIÓN AL ORDEN DE DESPLIEGUE: si esta restricción entra antes de que el
+// código nuevo esté en producción, la aprobación de partes deja de funcionar al
+// instante, porque el updateDoc actual sigue mandando esos dos campos.
+// El orden seguro es: (1) código nuevo desplegado, (2) migración, (3) reglas.
+// ─────────────────────────────────────────────────────────────────────────────

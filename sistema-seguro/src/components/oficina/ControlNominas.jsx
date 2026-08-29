@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileSpreadsheet, Euro, User, CalendarOff, RotateCcw, PencilLine } from 'lucide-react';
 import { HORAS_BASE_POR_DEFECTO, baseMensualDe, tieneBaseConfigurada, horasNormalesDelPeriodo } from '../../utils/nomina';
+import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV } from '../../utils/csv';
 
 export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, inputStyle, fechaInicio, setFechaInicio, fechaFin, setFechaFin, pagoHoraNormal, setPagoHoraNormal, pagoHoraExtra, setPagoHoraExtra, horasTrabajadores, buscarPartesPorFechas, trabajadoresList }) {
 
@@ -78,18 +79,28 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
 
   const exportarExcelPersonalizado = () => {
       if (datosCalculados.length === 0) { alert("No hay datos para exportar."); return; }
-      let csvContent = "﻿Trabajador;Base Mensual (h);Origen de la Base;Días de Ausencia;Horas Normales;H. Normales Calculadas;Ajuste Manual Normales;Horas Extras;H. Extras de Albaranes;Ajuste Manual Extras;Tarifa Normal (€);Tarifa Extra (€);Total Pagar (€)\n";
-      datosCalculados.forEach(item => {
-          const origenBase = item.baseConfigurada ? "Ficha del trabajador" : "Por defecto (sin configurar)";
-          csvContent += `"${item.nombre}";${item.baseMensual};"${origenBase}";${item.dLibres};${item.hNormal};${item.hNormalCalc};"${item.normalManual ? 'SÍ' : ''}";${item.hExtra};${item.origE};"${item.extraManual ? 'SÍ' : ''}";${item.tarifaN};${item.tarifaE};${item.totalPagar.toFixed(2)}\n`;
-      });
-      csvContent += `\n"TOTAL GLOBAL A PAGAR";"";"";"";"";"";"";"";"";"";"";"";"${totalGeneralNomina.toFixed(2)}"\n`;
-      csvContent += `"Ajustes manuales en esta liquidación";"${totalAjustesManuales}"\n`;
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a"); link.setAttribute("href", url);
-      link.setAttribute("download", `Nomina_${fechaInicio || 'periodo'}_al_${fechaFin || 'actual'}.csv`);
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+      const cabeceras = ['Trabajador', 'Base Mensual (h)', 'Origen de la Base', 'Días de Ausencia',
+          'Horas Normales', 'H. Normales Calculadas', 'Ajuste Manual Normales',
+          'Horas Extras', 'H. Extras de Albaranes', 'Ajuste Manual Extras',
+          'Tarifa Normal (€)', 'Tarifa Extra (€)', 'Total Pagar (€)'];
+      const filas = datosCalculados.map((item) => ([
+          textoCSV(item.nombre),
+          numeroCSV(item.baseMensual, 0),
+          textoCSV(item.baseConfigurada ? 'Ficha del trabajador' : 'Por defecto (sin configurar)'),
+          enteroCSV(item.dLibres),
+          numeroCSV(item.hNormal),
+          numeroCSV(item.hNormalCalc),
+          textoCSV(item.normalManual ? 'SÍ' : ''),
+          numeroCSV(item.hExtra),
+          numeroCSV(item.origE),
+          textoCSV(item.extraManual ? 'SÍ' : ''),
+          numeroCSV(item.tarifaN),
+          numeroCSV(item.tarifaE),
+          numeroCSV(item.totalPagar)
+      ]));
+      filas.push([textoCSV('TOTAL GLOBAL A PAGAR'), ...Array(11).fill(textoCSV('')), numeroCSV(totalGeneralNomina)]);
+      filas.push([textoCSV('Ajustes manuales en esta liquidación'), enteroCSV(totalAjustesManuales)]);
+      descargarCSV(`Nomina_${fechaInicio || 'periodo'}_al_${fechaFin || 'actual'}.csv`, construirCSV(cabeceras, filas));
   };
 
   const badgeManualStyle = {

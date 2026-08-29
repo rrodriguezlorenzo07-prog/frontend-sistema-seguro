@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db, auth, authSecundario, functions } from '../firebase'; 
 import { httpsCallable } from 'firebase/functions';
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, getDoc, writeBatch, orderBy, limit, startAfter, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, getDoc, writeBatch, increment, orderBy, limit, startAfter, where } from 'firebase/firestore';
 import { signOut, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth'; 
 import { Building2, FileText, Users, Calculator, Inbox, CheckCircle, Package, FolderOpen, AlertTriangle, Settings, Menu, X, ArrowLeftRight } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -9,6 +9,8 @@ import autoTable from 'jspdf-autotable';
 
 import { horasTotalesDocumento } from '../utils/horasDocumento';
 import { HORAS_BASE_POR_DEFECTO } from '../utils/nomina';
+import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV, fechaParaNombre } from '../utils/csv';
+import { esDelDia } from '../utils/fechas';
 import BandejaValidacion from './oficina/BandejaValidacion';
 import ResumenMetricas from './oficina/ResumenMetricas';
 import GestionProyectos from './oficina/GestionProyectos';
@@ -101,7 +103,7 @@ export default function PanelOficina({ cambiarVista }) {
   const [toast, setToast] = useState({ visible: false, mensaje: '', tipo: 'success' });
   const [modalConfirm, setModalConfirm] = useState({ visible: false, titulo: '', mensaje: '', onConfirm: null });
 
-  const mostrarToast = (mensaje, tipo = 'success') => { setToast({ visible: true, mensaje, tipo }); setTimeout(() => setToast({ visible: false, mensaje: '', tipo: 'success' }), 3000); };
+  const mostrarToast = useCallback((mensaje, tipo = 'success') => { setToast({ visible: true, mensaje, tipo }); setTimeout(() => setToast({ visible: false, mensaje: '', tipo: 'success' }), 3000); }, []);
   const pedirConfirmacion = (titulo, mensaje, accionConfirmar) => { setModalConfirm({ visible: true, titulo, mensaje, onConfirm: accionConfirmar }); };
   const cerrarModal = () => setModalConfirm({ ...modalConfirm, visible: false });
 
@@ -161,7 +163,7 @@ export default function PanelOficina({ cambiarVista }) {
       setPresupuestosList(mapear(await getDocs(consultaPresupuestos())));
   };
 
-  const cargarDatos = async () => {
+  const cargarDatos = useCallback(async () => {
     setCargando(true);
     try {
       // Las siete consultas van en paralelo: antes eran siete await encadenados.
@@ -195,9 +197,9 @@ export default function PanelOficina({ cambiarVista }) {
       setCertificacionesList(mapear(snapCert));
       setFacturasList(mapear(snapFacturas));
     } catch (error) { console.error("Error:", error); mostrarToast("Error cargando base de datos", "error"); } finally { setCargando(false); }
-  };
+  }, [mostrarToast]);
 
-  useEffect(() => { cargarDatos(); }, []);
+  useEffect(() => { cargarDatos(); }, [cargarDatos]);
 
   const cargarMasPartes = async () => {
       if (!ultimoDocPartes) return;
@@ -345,7 +347,14 @@ export default function PanelOficina({ cambiarVista }) {
       }
       setValidandoParte(true);
       try {
-          if (parteAValidar.materialesUsados && parteAValidar.materialesUsados.length > 0) { for (let matUsado of parteAValidar.materialesUsados) { const docRef = doc(db, 'inventario', matUsado.id); const docSnap = await getDoc(docRef); if (docSnap.exists()) { await updateDoc(docRef, { stock: docSnap.data().stock - matUsado.cantidad }); } } }
+          // Stock: increment() resuelve la resta en el servidor, así que dos
+          // validaciones simultáneas ya no se pisan. Se comprueba antes qué
+          // materiales siguen existiendo, porque batch.update() sobre un documento
+          // borrado haría fallar todo el lote.
+          const materialesUsados = parteAValidar.materialesUsados || [];
+          const existencias = await Promise.all(
+              materialesUsados.map((mat) => getDoc(doc(db, 'inventario', mat.id)))
+          );
           if (parteAValidar.tareasRealizadas && parteAValidar.tareasRealizadas.length > 0 && parteAValidar.obra) {
               const obraAsociada = obrasList.find(o => o.nombre === parteAValidar.obra);
               if (obraAsociada && obraAsociada.tareas) {
@@ -367,6 +376,10 @@ export default function PanelOficina({ cambiarVista }) {
           // El parte y su validación se escriben en el mismo lote: nunca puede quedar
           // un parte aprobado sin su documento en validaciones/.
           const lote = writeBatch(db);
+          materialesUsados.forEach((mat, indice) => {
+              if (!existencias[indice].exists()) return;
+              lote.update(doc(db, 'inventario', mat.id), { stock: increment(-(Number(mat.cantidad) || 0)) });
+          });
           lote.update(doc(db, 'partes_de_trabajo', parteAValidar.id), { estado: 'aprobado', fechaValidacion, certificado: false, facturado: false, papelera: false });
           lote.set(doc(db, 'validaciones', parteAValidar.id), {
               cuadrilla: cuadrillaNumerica,
@@ -403,7 +416,7 @@ export default function PanelOficina({ cambiarVista }) {
   const getTimeRango = () => { const start = new Date(fechaInicio).getTime(); const end = new Date(fechaFin).getTime() + 86399999; return { start, end }; };
   const partesHistorialFiltradosFecha = partesHistorial.filter(parte => { const { start, end } = getTimeRango(); return parte.timestamp >= start && parte.timestamp <= end; });
 
-  const partesDeHoy = partesHistorial.filter(p => p.fecha === new Date().toLocaleDateString());
+  const partesDeHoy = partesHistorial.filter(p => esDelDia(p.timestamp));
   const totalHorasHoy = partesDeHoy.reduce((total, p) => total + horasTotalesDocumento(p), 0);
   const trabajadoresHoy = new Set(partesDeHoy.map(p => p.creador)).size;
   let totalTareas = 0, tareasCompletadas = 0; obrasActivas.forEach(obra => { totalTareas += (obra.tareas?.length || 0); tareasCompletadas += (obra.tareas?.filter(t => t.completada).length || 0); });
@@ -417,8 +430,30 @@ export default function PanelOficina({ cambiarVista }) {
   const horasTrabajadores = calcularHorasPorTrabajador();
   const obtenerEstadisticasHotel = (nombreHotel) => { const partesDelHotel = partesHistorial.filter(p => p.obra === nombreHotel); let horasTotal = 0; const materialesMap = {}; partesDelHotel.forEach(p => { horasTotal += horasTotalesDocumento(p); if (p.materialesUsados && p.materialesUsados.length > 0) { p.materialesUsados.forEach(m => { materialesMap[m.nombre] = (materialesMap[m.nombre] || 0) + (Number(m.cantidad) || 0); }); } }); return { horas: horasTotal, materiales: Object.entries(materialesMap) }; };
 
-  const exportarPartesExcel = () => { let csv = "Fecha;Operarios (H. Extra);Horas Extra;Hotel/Obra;Habitaciones;Material Utilizado;Trabajo Realizado\n"; partesCoincidentes.forEach(p => { const fecha = p.fecha || ''; let textoCuadrilla = p.nombreTrabajador || p.creador; if (p.cuadrilla && p.cuadrilla.length > 0) { textoCuadrilla = p.cuadrilla.map(c => `${c.nombre}${(Number(c.horasExtra) || 0) > 0 ? ` (+${c.horasExtra}h extra)` : ''}`).join(' - '); } const horasExtraParte = Number(p.horasExtraAsignadas) || 0; const obra = p.obra || ''; const habs = p.habitacionesRango || ''; let textoMateriales = p.materialesUsados?.map(m => `${m.cantidad}x ${m.nombre}`).join(', ') || (p.material || '').replace(/;/g, ' - ').replace(/\n/g, ' '); const trabajo = (p.trabajo || '').replace(/;/g, ' - ').replace(/\n/g, ' '); csv += `${fecha};${textoCuadrilla};${horasExtraParte};${obra};${habs};${textoMateriales};${trabajo}\n`; }); const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Albaranes_${fechaInicio}_a_${fechaFin}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); mostrarToast("Excel generado"); };
-  const exportarAlmacenExcel = () => { let csv = "Material;Stock Actual\n"; materialesCoincidentes.forEach(m => { const nombreMat = (m.nombre || '').replace(/;/g, ' - ').replace(/\n/g, ' '); csv += `${nombreMat};${m.stock}\n`; }); const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Inventario_Almacen_${new Date().toLocaleDateString().replace(/\//g,'-')}.csv`); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); mostrarToast("Excel generado"); };
+  const exportarPartesExcel = () => {
+      const cabeceras = ['Fecha', 'Operarios (H. Extra)', 'Horas Extra', 'Hotel/Obra', 'Material Utilizado', 'Trabajo Realizado'];
+      const filas = partesCoincidentes.map((p) => {
+          const equipo = p.cuadrilla?.length > 0
+              ? p.cuadrilla.map(c => `${c.nombre}${(Number(c.horasExtra) || 0) > 0 ? ` (+${c.horasExtra}h extra)` : ''}`).join(' - ')
+              : (p.nombreTrabajador || p.creador || '');
+          const materiales = p.materialesUsados?.map(m => `${m.cantidad}x ${m.nombre}`).join(', ') || '';
+          return [
+              textoCSV(p.fecha || ''),
+              textoCSV(equipo),
+              numeroCSV(p.horasExtraAsignadas || 0),
+              textoCSV(p.obra || ''),
+              textoCSV(materiales),
+              textoCSV(p.trabajo || '')
+          ];
+      });
+      descargarCSV(`Albaranes_${fechaInicio}_a_${fechaFin}.csv`, construirCSV(cabeceras, filas));
+      mostrarToast("Excel generado");
+  };
+  const exportarAlmacenExcel = () => {
+      const filas = materialesCoincidentes.map((m) => [textoCSV(m.nombre || ''), enteroCSV(m.stock)]);
+      descargarCSV(`Inventario_Almacen_${fechaParaNombre()}.csv`, construirCSV(['Material', 'Stock Actual'], filas));
+      mostrarToast("Excel generado");
+  };
 
   const partesPendientesCertificar = partesHistorial.filter(p => p.obra === certObraSeleccionada && p.certificado !== true && p.facturado !== true);
   const toggleParteCertificacion = (id) => { setCertPartesSeleccionados(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };

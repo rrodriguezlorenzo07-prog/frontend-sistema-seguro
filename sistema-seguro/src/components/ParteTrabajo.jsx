@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
 import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage'; 
@@ -32,11 +32,11 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const [nombreOficial, setNombreOficial] = useState(usuario.email);
   const firmaRef = useRef(null);
 
-  const cargarMisPartes = async () => {
+  const cargarMisPartes = useCallback(async () => {
     if (!usuario) return;
     const resPartes = await getDocs(query(collection(db, 'partes_de_trabajo'), where("creador", "==", usuario.email)));
     setMisPartes(resPartes.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.timestamp - a.timestamp));
-  };
+  }, [usuario]);
 
   // Catálogos y ficha del operario: se cargan UNA vez por usuario y quedan en estado.
   // Antes se volvían a descargar enteros cada vez que se alternaba Parte / Historial.
@@ -57,7 +57,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   }, [usuario]);
 
   // El historial propio sí se refresca al entrar en esa pestaña.
-  useEffect(() => { cargarMisPartes(); }, [usuario, vistaMisPartes]);
+  useEffect(() => { cargarMisPartes(); }, [cargarMisPartes, vistaMisPartes]);
 
   const cerrarSesion = () => { signOut(auth).then(() => { window.location.reload(); }); };
 
