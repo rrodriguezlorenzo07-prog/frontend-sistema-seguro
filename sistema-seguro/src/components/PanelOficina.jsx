@@ -114,8 +114,34 @@ export default function PanelOficina({ cambiarVista }) {
   const consultaPresupuestos = () => query(collection(db, 'presupuestos'), orderBy('timestamp', 'desc'), limit(LIMITE_DOCUMENTOS));
   const consultaCertificaciones = () => query(collection(db, 'certificaciones'), orderBy('timestamp', 'desc'), limit(LIMITE_DOCUMENTOS));
   const consultaFacturas = () => query(collection(db, 'facturas'), orderBy('timestamp', 'desc'), limit(LIMITE_DOCUMENTOS));
+  const consultaValidaciones = () => query(collection(db, 'validaciones'), orderBy('timestamp', 'desc'), limit(TAMANO_PAGINA));
 
   const mapear = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const mapaDe = (snap) => new Map(snap.docs.map((d) => [d.id, d.data()]));
+
+  // La cuadrilla y las horas extra viven en validaciones/{parteId}, fuera del parte,
+  // para que el operario no vea las de sus compañeros al leer su propio parte.
+  // Aquí se fusionan en memoria: aguas abajo el objeto tiene la forma de siempre.
+  const hidratar = (partes, validaciones) => {
+      if (!validaciones || validaciones.size === 0) return partes;
+      return partes.map((p) => {
+          const v = validaciones.get(p.id);
+          return v ? { ...p, cuadrilla: v.cuadrilla, horasExtraAsignadas: v.horasExtraAsignadas } : p;
+      });
+  };
+
+  // Para páginas arbitrarias (búsqueda por fechas, cargar más): se piden las
+  // validaciones del mismo rango de timestamps que la página ya cargada.
+  const traerValidacionesDe = async (partes) => {
+      const marcas = partes.filter(p => p.estado === 'aprobado' && p.timestamp).map(p => Number(p.timestamp));
+      if (marcas.length === 0) return new Map();
+      const q = query(collection(db, 'validaciones'),
+          where('timestamp', '>=', Math.min(...marcas)),
+          where('timestamp', '<=', Math.max(...marcas)),
+          orderBy('timestamp', 'desc'), limit(TAMANO_PAGINA));
+      return mapaDe(await getDocs(q));
+  };
 
   // Refrescos de una sola colección, para no releer las siete tras cada escritura.
   const refrescarTrabajadores = async () => {
@@ -139,19 +165,20 @@ export default function PanelOficina({ cambiarVista }) {
     setCargando(true);
     try {
       // Las siete consultas van en paralelo: antes eran siete await encadenados.
-      const [snapPartes, snapObras, snapMateriales, snapPresu, snapTrab, snapCert, snapFacturas] = await Promise.all([
+      const [snapPartes, snapObras, snapMateriales, snapPresu, snapTrab, snapCert, snapFacturas, snapValidaciones] = await Promise.all([
         getDocs(consultaPartes()),
         getDocs(collection(db, 'obras')),
         getDocs(collection(db, 'inventario')),
         getDocs(consultaPresupuestos()),
         getDocs(collection(db, 'trabajadores')),
         getDocs(consultaCertificaciones()),
-        getDocs(consultaFacturas())
+        getDocs(consultaFacturas()),
+        getDocs(consultaValidaciones())
       ]);
 
       if (!snapPartes.empty) {
           setUltimoDocPartes(snapPartes.docs[snapPartes.docs.length - 1]);
-          setPartes(mapear(snapPartes));
+          setPartes(hidratar(mapear(snapPartes), mapaDe(snapValidaciones)));
           setHayMasPartes(snapPartes.docs.length === TAMANO_PAGINA);
       } else {
           setPartes([]); setUltimoDocPartes(null); setHayMasPartes(false);
@@ -183,7 +210,7 @@ export default function PanelOficina({ cambiarVista }) {
           const res = await getDocs(q);
           if (!res.empty) {
               setUltimoDocPartes(res.docs[res.docs.length - 1]);
-              const nuevos = res.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              const nuevos = hidratar(mapear(res), await traerValidacionesDe(mapear(res)));
               setPartes(prev => [...prev, ...nuevos]);
               if (res.docs.length < TAMANO_PAGINA) setHayMasPartes(false);
           } else { setHayMasPartes(false); }
@@ -208,7 +235,8 @@ export default function PanelOficina({ cambiarVista }) {
           // El orderBy va sobre el mismo campo que la desigualdad: no necesita índice compuesto.
           const q = query(collection(db, 'partes_de_trabajo'), where('timestamp', '>=', start), where('timestamp', '<=', end), orderBy('timestamp', 'desc'), limit(TAMANO_PAGINA));
           const snap = await getDocs(q);
-          setPartes(mapear(snap));
+          const partesPagina = mapear(snap);
+          setPartes(hidratar(partesPagina, await traerValidacionesDe(partesPagina)));
           setUltimoDocPartes(snap.empty ? null : snap.docs[snap.docs.length - 1]);
           setHayMasPartes(snap.docs.length === TAMANO_PAGINA);
           setModoBusqueda(true);
@@ -335,7 +363,19 @@ export default function PanelOficina({ cambiarVista }) {
           const cuadrillaNumerica = cuadrilla.map(op => ({ nombre: op.nombre, horasExtra: Number(op.horasExtra) || 0 }));
           const horasExtraAsignadas = cuadrillaNumerica.reduce((sum, op) => sum + op.horasExtra, 0);
           // Campos nuevos: no se pisa ninguno de los que escribe el operario.
-          await updateDoc(doc(db, 'partes_de_trabajo', parteAValidar.id), { estado: 'aprobado', cuadrilla: cuadrillaNumerica, horasExtraAsignadas, fechaValidacion: new Date().toLocaleDateString(), certificado: false, facturado: false, papelera: false });
+          const fechaValidacion = new Date().toLocaleDateString();
+          // El parte y su validación se escriben en el mismo lote: nunca puede quedar
+          // un parte aprobado sin su documento en validaciones/.
+          const lote = writeBatch(db);
+          lote.update(doc(db, 'partes_de_trabajo', parteAValidar.id), { estado: 'aprobado', fechaValidacion, certificado: false, facturado: false, papelera: false });
+          lote.set(doc(db, 'validaciones', parteAValidar.id), {
+              cuadrilla: cuadrillaNumerica,
+              horasExtraAsignadas,
+              timestamp: Number(parteAValidar.timestamp) || Date.now(),
+              obra: parteAValidar.obra ?? null,
+              fechaValidacion
+          }, { merge: true });
+          await lote.commit();
           setParteAValidar(null); setCuadrilla([]); cargarDatos(); mostrarToast("Albarán validado y guardado.");
       } catch (error) {
           console.error(error); mostrarToast("Error al validar el parte: " + error.message, "error");
@@ -461,7 +501,7 @@ export default function PanelOficina({ cambiarVista }) {
   const descargarPresupuestoExistente = (presupuesto) => { generarPDFPresupuesto(presupuesto); };
 
   const restaurarElemento = async (id, coleccion) => { await updateDoc(doc(db, coleccion, id), { papelera: false }); cargarDatos(); mostrarToast("Elemento restaurado con éxito."); };
-  const destruirElementoFisico = (id, coleccion) => { pedirConfirmacion("Destrucción Definitiva", "Esta acción es irreversible y los datos se perderán de la base de datos para siempre. ¿Continuar?", async () => { await deleteDoc(doc(db, coleccion, id)); cargarDatos(); mostrarToast("Elemento destruido permanentemente."); }); };
+  const destruirElementoFisico = (id, coleccion) => { pedirConfirmacion("Destrucción Definitiva", "Esta acción es irreversible y los datos se perderán de la base de datos para siempre. ¿Continuar?", async () => { await deleteDoc(doc(db, coleccion, id)); if (coleccion === 'partes_de_trabajo') { await deleteDoc(doc(db, 'validaciones', id)); } cargarDatos(); mostrarToast("Elemento destruido permanentemente."); }); };
 
   const catActivaStyle = (isActive) => ({ padding: '10px 15px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', letterSpacing: '1px', textTransform: 'uppercase', color: isActive ? '#1a1a1a' : '#94a3b8', borderBottom: isActive ? '2px solid #1a1a1a' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s', backgroundColor: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', outline: 'none', whiteSpace: 'nowrap' });
   const subMenuBtnStyle = (isActive) => ({ padding: '8px 16px', border: '1px solid #1a1a1a', background: isActive ? '#1a1a1a' : 'transparent', color: isActive ? 'white' : '#1a1a1a', fontWeight: 'bold', fontSize: '10px', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '50px', whiteSpace: 'nowrap' });

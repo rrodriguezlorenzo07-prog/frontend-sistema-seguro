@@ -108,6 +108,19 @@ service cloud.firestore {
       allow delete: if esAdmin();
     }
 
+    // ------------------------------------------------------------- validaciones
+    // Cuadrilla y horas extra por operario, fuera del parte para que su creador no
+    // vea las de sus compañeros. Solo oficina, ni siquiera el autor del parte.
+
+    match /validaciones/{parteId} {
+      allow read: if esAdmin();
+      allow create, update: if esAdmin()
+                            && request.resource.data.keys().hasAll(['cuadrilla', 'horasExtraAsignadas'])
+                            && request.resource.data.cuadrilla is list
+                            && request.resource.data.horasExtraAsignadas is number;
+      allow delete: if esAdmin();
+    }
+
     // ------------------------------------------------------------ trabajadores
 
     match /trabajadores/{trabajadorId} {
