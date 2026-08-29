@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from './firebase'; 
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
+import { signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { Menu, X, ArrowRight, ShieldCheck, ArrowLeft, LogOut, FileText, Building2 } from 'lucide-react';
 
@@ -12,9 +12,6 @@ export default function App() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     
-    const [esRegistro, setEsRegistro] = useState(false);
-    const [nombreRegistro, setNombreRegistro] = useState('');
-
     const [sesionIniciada, setSesionIniciada] = useState(false);
     const [vistaActiva, setVistaActiva] = useState('home'); 
     const [mostrarLogin, setMostrarLogin] = useState(false);
@@ -40,7 +37,7 @@ export default function App() {
 
                 try {
                     // 1. Buscamos al trabajador en la base de datos por su email
-                    const q = query(collection(db, 'trabajadores'), where("email", "==", usuario.email));
+                    const q = query(collection(db, 'trabajadores'), where("email", "==", usuario.email.toLowerCase().trim()));
                     const querySnapshot = await getDocs(q);
                     
                     if (!querySnapshot.empty) {
@@ -55,11 +52,6 @@ export default function App() {
                         // Respaldo por si todavía usas la antigua colección 'usuarios'
                         const docRef = await getDoc(doc(db, 'usuarios', usuario.uid));
                         if (docRef.exists()) { nombreDB = docRef.data().nombre; } 
-                    }
-
-                    // 2. SALVAVIDAS MAESTRO: Si es tu correo, SIEMPRE serás admin por seguridad
-                    if (usuario.email === "rrodriguezlorenzo02@gmail.com" || usuario.email === "el_correo_de_tu_padre@gmail.com") {
-                        esAdminDB = true;
                     }
 
                     setNombreUsuario(nombreDB);
@@ -82,15 +74,10 @@ export default function App() {
     const manejarEnvio = async (evento) => {
         evento.preventDefault();
         try {
-            if (esRegistro) {
-                await createUserWithEmailAndPassword(auth, email, password);
-                setErrorLogin('');
-            } else {
-                await signInWithEmailAndPassword(auth, email, password);
-                setErrorLogin('');
-            }
+            await signInWithEmailAndPassword(auth, email, password);
+            setErrorLogin('');
         } catch (error) { 
-            setErrorLogin('Error en las credenciales o cuenta ya existente.');
+            setErrorLogin('Correo o contraseña incorrectos.');
         }
     };
 
@@ -103,7 +90,7 @@ export default function App() {
 
     const cerrarSesion = async () => {
         await signOut(auth);
-        setEmail(''); setPassword(''); setNombreRegistro(''); setVistaActiva('home'); setMostrarLogin(false);
+        setEmail(''); setPassword(''); setVistaActiva('home'); setMostrarLogin(false);
         setMenuMovilAbierto(false);
     };
 
@@ -118,7 +105,7 @@ export default function App() {
                 
                 <div style={{ width: '100%', maxWidth: '400px', padding: '50px 40px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', boxShadow: '0 10px 40px rgba(0,0,0,0.03)' }}>
                     <h2 style={{ margin: '0 0 30px 0', fontSize: '24px', fontWeight: '300', letterSpacing: '4px', textTransform: 'uppercase', textAlign: 'center', color: '#1a1a1a' }}>
-                        {esRegistro ? 'Alta de Personal' : 'Acceso Portal'}
+                        Acceso Portal
                     </h2>
                     
                     {errorLogin && (
@@ -129,13 +116,6 @@ export default function App() {
 
                     <form onSubmit={manejarEnvio} style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
                         
-                        {esRegistro && (
-                            <div>
-                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', color: '#64748b' }}>Nombre Completo</label>
-                                <input type="text" value={nombreRegistro} onChange={(e)=>setNombreRegistro(e.target.value)} style={{ width: '100%', padding: '14px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', backgroundColor: '#fafafa', fontSize: '14px' }} required />
-                            </div>
-                        )}
-
                         <div>
                             <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', color: '#64748b' }}>Correo Electrónico</label>
                             <input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} style={{ width: '100%', padding: '14px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', backgroundColor: '#fafafa', fontSize: '14px' }} required />
@@ -143,20 +123,15 @@ export default function App() {
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                                 <label style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', color: '#64748b' }}>Contraseña</label>
-                                {!esRegistro && <button type="button" onClick={recuperarContrasena} style={{ background: 'none', border: 'none', color: '#1a1a1a', fontSize: '10px', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}>¿Olvidada?</button>}
+                                <button type="button" onClick={recuperarContrasena} style={{ background: 'none', border: 'none', color: '#1a1a1a', fontSize: '10px', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}>¿Olvidada?</button>
                             </div>
                             <input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} style={{ width: '100%', padding: '14px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', backgroundColor: '#fafafa', fontSize: '14px' }} required />
                         </div>
                         <button type="submit" style={{ padding: '18px', backgroundColor: '#1a1a1a', color: '#ffffff', border: 'none', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', cursor: 'pointer', marginTop: '10px', transition: 'background 0.3s' }}>
-                            {esRegistro ? 'Crear Cuenta' : 'Entrar al Sistema'}
+                            Entrar al Sistema
                         </button>
                     </form>
 
-                    <div style={{ marginTop: '25px', textAlign: 'center', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
-                        <button onClick={() => setEsRegistro(!esRegistro)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                            {esRegistro ? '¿Ya tienes cuenta? Inicia Sesión' : '¿No tienes cuenta? Solicita acceso'}
-                        </button>
-                    </div>
                 </div>
             </div>
         );

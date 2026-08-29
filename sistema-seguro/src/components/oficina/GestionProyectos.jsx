@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Trash2, X, History, User, CheckCircle, Search, ListChecks, Check } from 'lucide-react';
 import { db } from '../../firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 export default function GestionProyectos({ blockStyle, labelStyle, inputStyle, btnBlackStyle, nuevaObra, setNuevaObra, numPlantas, setNumPlantas, configHabitaciones, setConfigHabitaciones, generarHotelInteligente, obrasList, obraActiva, setObraActiva, borrarObra, obtenerEstadisticasHotel, marcarTareaHotel }) {
   
@@ -36,7 +36,10 @@ export default function GestionProyectos({ blockStyle, labelStyle, inputStyle, b
       setHabitacionActiva(tarea);
       setLoadingHistorial(true);
       try {
-          const q = query(collection(db, 'partes_de_trabajo'), where("obra", "==", obraActiva.nombre));
+          // Sin orderBy a propósito: combinar la igualdad sobre `obra` con un orden por
+          // `timestamp` exigiría un índice compuesto que no existe en el proyecto.
+          // El historial resultante se ordena en cliente unas líneas más abajo.
+          const q = query(collection(db, 'partes_de_trabajo'), where("obra", "==", obraActiva.nombre), limit(200));
           const querySnapshot = await getDocs(q);
           
           let historial = [];

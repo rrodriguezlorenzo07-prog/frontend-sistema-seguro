@@ -1,5 +1,6 @@
 import React from 'react';
 import { Edit, Trash2, KeyRound } from 'lucide-react';
+import { HORAS_BASE_POR_DEFECTO } from '../../utils/nomina';
 
 export default function PlantillaPersonal({ 
     blockStyle, labelStyle, inputStyle, btnBlackStyle, 
@@ -10,7 +11,7 @@ export default function PlantillaPersonal({
     editandoTrabId, trabEditado, setTrabEditado, 
     guardarEdicionTrabajador, enviarResetPass, 
     setEditandoTrabId, iniciarEdicionTrabajador, 
-    borrarTrabajador, cambiarRolTrabajador // <--- AÑADIDO AQUI
+    borrarTrabajador, cambiarRolTrabajador, cambiandoRolId // <--- AÑADIDO AQUI
 }) {
   return (
       <div style={blockStyle}>
@@ -30,6 +31,7 @@ export default function PlantillaPersonal({
                           <div style={{ display: 'flex', gap: '10px', width: '100%', alignItems: 'center', flexWrap: 'wrap' }}>
                               <input type="text" value={trabEditado.nombre} onChange={e => setTrabEditado({...trabEditado, nombre: e.target.value})} style={{ flex: 1, padding: '10px', border: '1px solid #1a1a1a', outline: 'none', fontSize: '12px', minWidth: '150px' }} />
                               <input type="email" value={trabEditado.email} onChange={e => setTrabEditado({...trabEditado, email: e.target.value})} style={{ flex: 1, padding: '10px', border: '1px solid #1a1a1a', outline: 'none', fontSize: '12px', minWidth: '150px' }} />
+                              <input type="number" min="0" step="1" placeholder="Base mensual (h)" value={trabEditado.horasBaseMensuales ?? ''} onChange={e => setTrabEditado({...trabEditado, horasBaseMensuales: e.target.value})} style={{ width: '150px', padding: '10px', border: '1px solid #1a1a1a', outline: 'none', fontSize: '12px' }} title={`Horas normales de contrato al mes. Vacío = valor por defecto (${HORAS_BASE_POR_DEFECTO} h)`} />
                               <div style={{ display: 'flex', gap: '5px' }}>
                                   <button onClick={guardarEdicionTrabajador} style={{ background: '#1a1a1a', color: 'white', border: 'none', padding: '10px 15px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Guardar</button>
                                   {trabEditado.email && ( 
@@ -43,12 +45,14 @@ export default function PlantillaPersonal({
                               <div style={{ flex: 1, minWidth: '200px' }}>
                                   <strong style={{ fontSize: '13px', textTransform: 'uppercase' }}>{trab.nombre}</strong>
                                   <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>CUENTA VINCULADA: {trab.email ? trab.email : 'SIN VINCULAR'}</div>
+                                  <div style={{ fontSize: '11px', color: trab.horasBaseMensuales ? '#64748b' : '#b45309', marginTop: '2px' }}>BASE MENSUAL: {trab.horasBaseMensuales ? `${trab.horasBaseMensuales} h` : `${HORAS_BASE_POR_DEFECTO} h (por defecto, sin configurar)`}</div>
                               </div>
                               <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
                                   
                                   {/* BOTÓN INTERRUPTOR PARA CAMBIAR DE ROL */}
                                   <button 
                                       onClick={() => cambiarRolTrabajador(trab.id, trab.rol || 'operario', trab.nombre)}
+                                      disabled={cambiandoRolId === trab.id}
                                       style={{
                                           padding: '6px 12px',
                                           borderRadius: '50px',
@@ -56,7 +60,8 @@ export default function PlantillaPersonal({
                                           fontWeight: 'bold',
                                           letterSpacing: '1px',
                                           textTransform: 'uppercase',
-                                          cursor: 'pointer',
+                                          cursor: cambiandoRolId === trab.id ? 'wait' : 'pointer',
+                                          opacity: cambiandoRolId === trab.id ? 0.6 : 1,
                                           border: trab.rol === 'admin' ? '1px solid #2563eb' : '1px solid #e5e7eb',
                                           backgroundColor: trab.rol === 'admin' ? '#eff6ff' : '#fafafa',
                                           color: trab.rol === 'admin' ? '#2563eb' : '#64748b',
@@ -64,7 +69,7 @@ export default function PlantillaPersonal({
                                       }}
                                       title="Haz clic para cambiar los permisos"
                                   >
-                                      {trab.rol === 'admin' ? 'Administrador' : 'Operario'}
+                                      {cambiandoRolId === trab.id ? 'Aplicando...' : (trab.rol === 'admin' ? 'Administrador' : 'Operario')}
                                   </button>
 
                                   <button onClick={() => iniciarEdicionTrabajador(trab)} style={{ color: '#1a1a1a', background: 'none', border: 'none', cursor: 'pointer' }}><Edit size={16}/></button>

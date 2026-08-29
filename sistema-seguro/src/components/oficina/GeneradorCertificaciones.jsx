@@ -3,6 +3,7 @@ import { FileCheck, CheckSquare, Trash2, Eye, X, Search, Plus, FileText, PenTool
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { db } from '../../firebase';
+import { horasTotalesDocumento } from '../../utils/horasDocumento';
 import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 
 export default function GeneradorCertificaciones({ blockStyle, labelStyle, inputStyle, btnBlackStyle, certObraSeleccionada, setCertObraSeleccionada, setCertPartesSeleccionados, obrasList, partesPendientesCertificar, toggleParteCertificacion, certPartesSeleccionados, certificacionesList, borrarCertificacion }) {
@@ -71,7 +72,7 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
   let itemsAValorar = [];
   
   albaranesSeleccionadosData.forEach(alb => {
-      const horas = Number(alb.horasTotales) || Number(alb.horas) || 0;
+      const horas = horasTotalesDocumento(alb);
       if (horas > 0) {
           const equipo = alb.cuadrilla?.length > 0 ? alb.cuadrilla.map(c=>c.nombre).join(', ') : (alb.nombreTrabajador || 'Equipo');
           itemsAValorar.push({ idKey: `${alb.id}-H`, concepto: `[Mano de Obra] ${equipo}`, cantidad: horas, fecha: alb.fecha });
@@ -210,12 +211,12 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
           pdfDoc.text(certObraSeleccionada, 14, 62);
 
           let datosTabla = [];
-          const totalHorasCert = albaranesSeleccionadosData.reduce((acc, p) => acc + (Number(p.horasTotales) || 0), 0);
+          const totalHorasCert = albaranesSeleccionadosData.reduce((acc, p) => acc + horasTotalesDocumento(p), 0);
 
           albaranesSeleccionadosData.forEach(p => {
-              const equipo = p.cuadrilla?.length > 0 ? p.cuadrilla.map(c => `${c.nombre} (${c.horas}h)`).join(', ') : (p.nombreTrabajador || 'Sin asignar');
+              const equipo = p.cuadrilla?.length > 0 ? p.cuadrilla.map(c => c.nombre).join(', ') : (p.nombreTrabajador || 'Sin asignar');
               let textoTareas = p.tareasRealizadas?.length > 0 ? p.tareasRealizadas.map(t => `• [${t.ubicacion}]: ${t.descripcion}`).join('\n') : (p.trabajo || 'Sin especificar');
-              datosTabla.push([ p.fecha || '', equipo, textoTareas, `${p.horasTotales?.toString() || '0'}h` ]);
+              datosTabla.push([ p.fecha || '', equipo, textoTareas, `${horasTotalesDocumento(p)}h` ]);
           });
 
           autoTable(pdfDoc, { 
@@ -306,7 +307,7 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
                                           <div key={idx} style={{ padding: '0', backgroundColor: '#fff', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}> 
                                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fafafa', padding: '10px 15px', borderBottom: '1px solid #e5e7eb' }}>
                                                   <strong style={{ fontSize: '12px', color: '#1a1a1a' }}>DÍA: {alb.fecha}</strong>
-                                                  <div><span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '10px' }}>Mat: {costeMatDia.toFixed(2)}€</span><span style={{ fontSize: '11px', fontWeight: 'bold', backgroundColor: '#1a1a1a', color: '#fff', padding: '4px 8px' }}>{alb.horas || alb.horasTotales || 0} H</span></div>
+                                                  <div><span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '10px' }}>Mat: {costeMatDia.toFixed(2)}€</span><span style={{ fontSize: '11px', fontWeight: 'bold', backgroundColor: '#1a1a1a', color: '#fff', padding: '4px 8px' }}>{horasTotalesDocumento(alb)} H</span></div>
                                               </div>
                                               <div style={{ padding: '15px', borderBottom: '1px dashed #e5e7eb' }}>
                                                   {alb.tareasRealizadas && alb.tareasRealizadas.length > 0 ? (
@@ -389,7 +390,7 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
                                   <div key={p.id} onClick={() => toggleParteCertificacion(p.id)} style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '15px', border: certPartesSeleccionados.includes(p.id) ? '2px solid #1a1a1a' : '1px solid #e5e7eb', backgroundColor: certPartesSeleccionados.includes(p.id) ? '#fafafa' : '#ffffff', cursor: 'pointer' }}>
                                       <div style={{ width: '20px', height: '20px', border: '2px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: certPartesSeleccionados.includes(p.id) ? '#1a1a1a' : 'transparent' }}>{certPartesSeleccionados.includes(p.id) && <CheckSquare size={14} color="#ffffff" />}</div>
                                       <div style={{ flex: 1 }}>
-                                          <div style={{ fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase' }}>FECHA: {p.fecha} <span style={{ color: '#64748b', fontWeight: 'normal', marginLeft: '10px' }}>| {p.horasTotales || p.horas || 0} h</span></div>
+                                          <div style={{ fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase' }}>FECHA: {p.fecha} <span style={{ color: '#64748b', fontWeight: 'normal', marginLeft: '10px' }}>| {horasTotalesDocumento(p)} h</span></div>
                                       </div>
                                   </div>
                               ))}

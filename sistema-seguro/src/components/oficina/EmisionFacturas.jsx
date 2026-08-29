@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CreditCard, CheckSquare, Trash2, Eye, X, Search } from 'lucide-react';
+import { horasTotalesDocumento } from '../../utils/horasDocumento';
 
 export default function EmisionFacturas({ blockStyle, labelStyle, inputStyle, btnBlackStyle, modoFacturacion, setModoFacturacion, setItemsAFacturar, facturaCliente, setFacturaCliente, facTarifaHora, setFacTarifaHora, facImporteMateriales, setFacImporteMateriales, partesHistorial, certificacionesList, itemsAFacturar, toggleItemFacturacion, generarPDFFactura, facturasList, borrarFactura }) {
   
@@ -110,7 +111,7 @@ export default function EmisionFacturas({ blockStyle, labelStyle, inputStyle, bt
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}> 
                                   {certPreview.albaranes?.map((alb, idx) => ( 
                                       <div key={idx} style={{ padding: '10px', backgroundColor: '#fafafa', border: '1px solid #e5e7eb' }}> 
-                                          <strong>DÍA: {alb.fecha}</strong> ({alb.horas || alb.horasTotales || 0} h)
+                                          <strong>DÍA: {alb.fecha}</strong> ({horasTotalesDocumento(alb)} h)
                                           {alb.tareasRealizadas?.length > 0 ? (
                                               <ul style={{ margin: '5px 0 0 20px', fontSize: '12px' }}>{alb.tareasRealizadas.map((t, i) => <li key={i}><strong>{t.ubicacion}:</strong> {t.descripcion}</li>)}</ul>
                                           ) : <p style={{ margin: '5px 0 0 0', fontSize: '12px' }}>{alb.trabajo}</p>}

@@ -50,7 +50,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
           doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text("PERSONAL ASIGNADO:", 14, 75);
           doc.setFontSize(10); doc.setFont("helvetica", "normal"); 
-          const equipoStr = parte.cuadrilla?.length > 0 ? parte.cuadrilla.map(c=>`${c.nombre} (${c.horas}h)`).join(' - ') : (parte.nombreTrabajador || 'Sin asignar');
+          const equipoStr = parte.cuadrilla?.length > 0 ? parte.cuadrilla.map(c=>c.nombre).join(' - ') : (parte.nombreTrabajador || 'Sin asignar');
           doc.text(String(equipoStr), 14, 82);
 
           let finalY = 95;
@@ -117,7 +117,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
                            <div style={{ marginBottom: '20px' }}>
                                <p style={{ margin: '0 0 5px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Personal Asignado</p>
-                               <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #1a1a1a' }}>{partePreview.cuadrilla?.length > 0 ? partePreview.cuadrilla.map(c=>`${c.nombre} (${c.horas}h)`).join(' - ') : partePreview.nombreTrabajador}</p>
+                               <p style={{ margin: 0, padding: '10px', backgroundColor: '#fafafa', border: '1px solid #1a1a1a' }}>{partePreview.cuadrilla?.length > 0 ? partePreview.cuadrilla.map(c=>c.nombre).join(' - ') : partePreview.nombreTrabajador}</p>
                            </div>
 
                            {partePreview.materialesUsados && partePreview.materialesUsados.length > 0 && (
@@ -201,7 +201,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                                     {!parte.facturado && !parte.certificado && <span style={{ border: '1px solid #1a1a1a', padding: '4px 8px', fontSize: '10px', fontWeight: 'bold' }}>Validado libre</span>}
                                 </div>
                             </div>
-                            <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>ASIGNACIÓN:</strong> {parte.cuadrilla?.length > 0 ? parte.cuadrilla.map(c=>`${c.nombre} (${c.horas}h)`).join(' - ') : parte.nombreTrabajador}</div>
+                            <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>ASIGNACIÓN:</strong> {parte.cuadrilla?.length > 0 ? parte.cuadrilla.map(c=>c.nombre).join(' - ') : parte.nombreTrabajador}</div>
                             <div style={{ fontSize: '12px', marginBottom: '10px' }}><strong>MATERIAL:</strong> {parte.materialesUsados?.length > 0 ? parte.materialesUsados.map(m=>`${m.cantidad}x ${m.nombre}`).join(' / ') : 'Ninguno'}</div>
                             <div style={{ fontSize: '12px', color: '#475569', borderLeft: '3px solid #1a1a1a', paddingLeft: '10px', marginTop: '10px' }}><em>{parte.tareasRealizadas?.length > 0 ? parte.tareasRealizadas.map(t => `${t.ubicacion}: ${t.descripcion}`).join(' | ') : (parte.trabajo || 'Sin observaciones')}</em></div>
                         </div>

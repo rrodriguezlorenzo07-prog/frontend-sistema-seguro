@@ -32,30 +32,32 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const [nombreOficial, setNombreOficial] = useState(usuario.email);
   const firmaRef = useRef(null);
 
-  useEffect(() => {
-    const cargarDatos = async () => {
-      try {
-        const qTrab = query(collection(db, 'trabajadores'), where("email", "==", usuario.email.toLowerCase().trim()));
-        const resTrab = await getDocs(qTrab);
-        if (!resTrab.empty) { setNombreOficial(resTrab.docs[0].data().nombre); }
+  const cargarMisPartes = async () => {
+    if (!usuario) return;
+    const resPartes = await getDocs(query(collection(db, 'partes_de_trabajo'), where("creador", "==", usuario.email)));
+    setMisPartes(resPartes.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.timestamp - a.timestamp));
+  };
 
-        const resObras = await getDocs(collection(db, 'obras'));
+  // Catálogos y ficha del operario: se cargan UNA vez por usuario y quedan en estado.
+  // Antes se volvían a descargar enteros cada vez que se alternaba Parte / Historial.
+  useEffect(() => {
+    const cargarCatalogos = async () => {
+      try {
+        const [resTrab, resObras, resInv] = await Promise.all([
+          getDocs(query(collection(db, 'trabajadores'), where("email", "==", usuario.email.toLowerCase().trim()))),
+          getDocs(collection(db, 'obras')),
+          getDocs(collection(db, 'inventario'))
+        ]);
+        if (!resTrab.empty) { setNombreOficial(resTrab.docs[0].data().nombre); }
         setObrasList(resObras.docs.map(d => ({ id: d.id, ...d.data() })));
-        
-        const resInv = await getDocs(collection(db, 'inventario'));
         setInventario(resInv.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (error) { console.error("Error:", error); }
     };
-    cargarDatos();
-    cargarMisPartes();
-  }, [usuario, vistaMisPartes]);
+    cargarCatalogos();
+  }, [usuario]);
 
-  const cargarMisPartes = async () => {
-    if (usuario) {
-      const resPartes = await getDocs(query(collection(db, 'partes_de_trabajo'), where("creador", "==", usuario.email)));
-      setMisPartes(resPartes.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.timestamp - a.timestamp));
-    }
-  };
+  // El historial propio sí se refresca al entrar en esa pestaña.
+  useEffect(() => { cargarMisPartes(); }, [usuario, vistaMisPartes]);
 
   const cerrarSesion = () => { signOut(auth).then(() => { window.location.reload(); }); };
 
