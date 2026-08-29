@@ -406,7 +406,7 @@ export default function PanelOficina({ cambiarVista }) {
       setObraActiva({...obraActiva, tareas: tareasNuevas}); actualizarEnLista(setObrasList, obraActiva.id, { tareas: tareasNuevas }); 
   };  
   const borrarObra = (id) => { pedirConfirmacion("Cerrar Proyecto", "Vas a enviar este hotel a la papelera. Podrás recuperarlo con todo su progreso. ¿Proceder?", async () => { await updateDoc(doc(db, 'obras', id), { papelera: true }); setObraActiva(null); actualizarEnLista(setObrasList, id, { papelera: true }); mostrarToast("Proyecto en papelera."); }); };
-  const borrarParte = (id) => { pedirConfirmacion("Eliminar Documento", "¿Enviar este albarán a la papelera?", async () => { await updateDoc(doc(db, 'partes_de_trabajo', id), { papelera: true }); actualizarEnLista(setPartes, id, { papelera: true }); mostrarToast("Albarán en papelera."); }); };
+  const borrarParte = (id) => { pedirConfirmacion("Rechazar Parte", "El parte volverá al operario como rechazado y se guardará en la papelera. ¿Proceder?", async () => { await updateDoc(doc(db, 'partes_de_trabajo', id), { estado: 'rechazado', papelera: true }); actualizarEnLista(setPartes, id, { estado: 'rechazado', papelera: true }); mostrarToast("Parte rechazado."); }); };
 
   const agregarMaterial = async () => { if(!nuevoMatNombre || !nuevoMatStock) { mostrarToast("Falta nombre o unidades", "error"); return; } const matExistente = materialesList.find(m => m.nombre.toLowerCase().trim() === nuevoMatNombre.toLowerCase().trim()); if(matExistente) { await updateDoc(doc(db, 'inventario', matExistente.id), { stock: matExistente.stock + parseInt(nuevoMatStock) }); } else { await addDoc(collection(db, 'inventario'), { nombre: nuevoMatNombre.trim(), stock: parseInt(nuevoMatStock) }); } setNuevoMatNombre(''); setNuevoMatStock(''); refrescarInventario(); mostrarToast("Inventario actualizado."); };
   const iniciarEdicionMat = (mat) => { setEditandoMatId(mat.id); setMatEditado(mat); };
@@ -535,7 +535,15 @@ export default function PanelOficina({ cambiarVista }) {
   const borrarPresupuesto = (id) => { pedirConfirmacion("Eliminar Presupuesto", "¿Estás seguro de querer borrar esta oferta del sistema?", async () => { await deleteDoc(doc(db, 'presupuestos', id)); quitarDeLista(setPresupuestosList, id); mostrarToast("Presupuesto eliminado."); }); };
   const descargarPresupuestoExistente = (presupuesto) => { generarPDFPresupuesto(presupuesto); };
 
-  const restaurarElemento = async (id, coleccion) => { await updateDoc(doc(db, coleccion, id), { papelera: false }); cargarDatos(); mostrarToast("Elemento restaurado con éxito."); };
+  const restaurarElemento = async (id, coleccion) => {
+      // Restaurar un parte rechazado deshace el rechazo: vuelve a la bandeja.
+      const esParteRechazado = coleccion === 'partes_de_trabajo'
+          && partes.find(p => p.id === id)?.estado === 'rechazado';
+      const cambios = esParteRechazado ? { papelera: false, estado: 'pendiente' } : { papelera: false };
+      await updateDoc(doc(db, coleccion, id), cambios);
+      cargarDatos();
+      mostrarToast(esParteRechazado ? "Parte devuelto a la bandeja de validación." : "Elemento restaurado con éxito.");
+  };
   const destruirElementoFisico = (id, coleccion) => { pedirConfirmacion("Destrucción Definitiva", "Esta acción es irreversible y los datos se perderán de la base de datos para siempre. ¿Continuar?", async () => { await deleteDoc(doc(db, coleccion, id)); if (coleccion === 'partes_de_trabajo') { await deleteDoc(doc(db, 'validaciones', id)); } cargarDatos(); mostrarToast("Elemento destruido permanentemente."); }); };
 
   const catActivaStyle = (isActive) => ({ padding: '10px 15px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', letterSpacing: '1px', textTransform: 'uppercase', color: isActive ? '#1a1a1a' : '#94a3b8', borderBottom: isActive ? '2px solid #1a1a1a' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s', backgroundColor: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', outline: 'none', whiteSpace: 'nowrap' });

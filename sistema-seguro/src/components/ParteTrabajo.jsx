@@ -61,6 +61,14 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
   const cerrarSesion = () => { signOut(auth).then(() => { window.location.reload(); }); };
 
+  // Un parte rechazado sigue siendo visible para su autor: sin este caso se le
+  // mostraba como "Aprobado", que es justo lo contrario de lo que ocurrió.
+  const insigniaEstado = (estado) => {
+      if (estado === 'aprobado') return { color: '#1a1a1a', texto: 'Aprobado' };
+      if (estado === 'rechazado') return { color: '#ef4444', texto: 'Rechazado' };
+      return { color: '#64748b', texto: 'Pendiente' };
+  };
+
   // === LÓGICA DE MATERIALES ===
   const agregarMaterialLista = () => {
       if(!matSelectId || matSelectCant < 1) return;
@@ -292,8 +300,8 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
                         <div style={{ fontWeight: 'bold', fontSize: '14px', letterSpacing: '1px', color: '#1a1a1a', textTransform: 'uppercase', marginBottom: '5px' }}>{p.obra}</div>
                         <div style={{ fontSize: '12px', color: '#64748b' }}>{p.fecha}</div>
                     </div>
-                    <span style={{ border: `1px solid ${p.estado === 'pendiente' ? '#64748b' : '#1a1a1a'}`, color: p.estado === 'pendiente' ? '#64748b' : '#1a1a1a', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>
-                        {p.estado === 'pendiente' ? 'Pendiente' : 'Aprobado'}
+                    <span style={{ border: `1px solid ${insigniaEstado(p.estado).color}`, color: insigniaEstado(p.estado).color, padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                        {insigniaEstado(p.estado).texto}
                     </span>
                 </div>
             ))}

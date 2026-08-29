@@ -88,11 +88,12 @@ service cloud.firestore {
 
       // Nadie que no sea oficina modifica un parte. Ni siquiera su autor.
       allow update: if esAdmin() && (
-                      // 1. pendiente: se valida, o se manda a la papelera
+                      // 1. pendiente o rechazado: se valida, se rechaza, se restaura,
+                      //    o se manda a la papelera
                       (
-                        resource.data.get('estado', '') == 'pendiente'
+                        resource.data.get('estado', '') in ['pendiente', 'rechazado']
                         && tocados().hasOnly(camposDeValidacion())
-                        && request.resource.data.estado in ['pendiente', 'aprobado']
+                        && request.resource.data.estado in ['pendiente', 'aprobado', 'rechazado']
                       )
                       ||
                       // 2. aprobado: congelado salvo el ciclo documental
