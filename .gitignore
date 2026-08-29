@@ -1,1 +1,5 @@
 .vercel
+
+# Credenciales: NUNCA versionar claves de cuenta de servicio de Firebase
+*firebase-adminsdk*.json
+serviceAccountKey.json

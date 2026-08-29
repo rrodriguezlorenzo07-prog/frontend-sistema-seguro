@@ -1,0 +1,44 @@
+rules_version = '2';
+
+// =============================================================================
+// ERP de obras y nóminas — reglas de Storage
+//
+// Única ruta que usa la aplicación: firmas/  (ParteTrabajo.jsx:115-119)
+//
+// ⚠️ LEE ESTO ANTES DE CONFIAR EN ESTAS REGLAS:
+//    Estas reglas gobiernan el acceso por SDK (subir, borrar, y la llamada a
+//    getDownloadURL). NO gobiernan la URL que getDownloadURL ya devolvió: esa
+//    URL lleva un token de descarga permanente y la sirve un endpoint público.
+//    Cualquiera con el enlace descarga la firma sin estar autenticado, con
+//    estas reglas puestas o sin ellas. Ver el informe de la Fase C.2.
+// =============================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    match /firmas/{archivo} {
+
+      // Cualquier usuario autenticado puede subir SU firma al enviar un parte.
+      // El nombre de archivo lo genera el cliente con timestamp + aleatorio.
+      allow create: if autenticado()
+                    && request.resource.size < 2 * 1024 * 1024
+                    && request.resource.contentType == 'image/png';
+
+      // Una firma es un documento de conformidad: no se reemplaza ni se borra.
+      allow update, delete: if false;
+
+      // Lectura por SDK. Ojo: la app NO pasa por aquí, porque guarda la URL
+      // tokenizada en el campo `firma` del parte y la pinta con <img src>.
+      allow read: if autenticado();
+    }
+
+    // Ninguna otra ruta está en uso.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

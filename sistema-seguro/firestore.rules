@@ -1,0 +1,179 @@
+rules_version = '2';
+
+// =============================================================================
+// ERP de obras y nóminas — reglas de Firestore
+//
+// ⚠️ REQUISITO ANTES DE DESPLEGAR:
+//    esAdmin() NO puede deducirse de la colección `trabajadores`, porque sus
+//    documentos usan ID autogenerado y se vinculan a la cuenta por email, y las
+//    reglas no pueden hacer queries. Hace falta uno de estos dos, o el panel de
+//    oficina dejará de funcionar por completo:
+//
+//    a) Custom Claim:  request.auth.token.admin == true   (vía Admin SDK)
+//    b) Documento:     roles/{uid}  ->  { admin: true }   (creado a mano en la consola)
+//
+//    Estas reglas aceptan las dos. Crea al menos un admin ANTES de desplegar y
+//    compruébalo en el emulador.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ----------------------------------------------------------------- helpers
+
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function correo() {
+      return autenticado() && 'email' in request.auth.token
+             ? request.auth.token.email.lower()
+             : '';
+    }
+
+    // Los get()/exists() dentro de reglas NO pasan por estas mismas reglas,
+    // así que la colección `roles` puede quedar cerrada a los clientes.
+    function esAdmin() {
+      return autenticado() && (
+        request.auth.token.get('admin', false) == true ||
+        (
+          exists(/databases/$(database)/documents/roles/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.get('admin', false) == true
+        )
+      );
+    }
+
+    // Campos que cambian entre el documento actual y el entrante
+    function tocados() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ------------------------------------------------------- partes_de_trabajo
+
+    match /partes_de_trabajo/{parteId} {
+
+      // Lo único que el operario puede enviar al crear un parte.
+      // Coincide exactamente con el payload de ParteTrabajo.jsx:130-142.
+      function camposDelOperario() {
+        return ['obra', 'tareasRealizadas', 'trabajo', 'materialesUsados', 'firma',
+                'creador', 'nombreTrabajador', 'fecha', 'hora', 'timestamp', 'estado'];
+      }
+
+      // Lo que la oficina escribe al validar (PanelOficina.jsx:251).
+      function camposDeValidacion() {
+        return ['estado', 'cuadrilla', 'horasExtraAsignadas', 'fechaValidacion',
+                'certificado', 'facturado', 'papelera'];
+      }
+
+      // ÚNICA excepción a la inmutabilidad de un parte aprobado: ciclo documental.
+      // Sin esto, certificar / facturar / papelera dejan de funcionar.
+      function camposPostAprobacion() {
+        return ['certificado', 'idCertificacion', 'facturado', 'papelera'];
+      }
+
+      function esSuyo() {
+        return autenticado() && resource.data.get('creador', '').lower() == correo();
+      }
+
+      // El operario solo ve los suyos; la oficina ve todo.
+      // La query de ParteTrabajo.jsx:55 filtra por creador, así que list pasa.
+      allow get, list: if esAdmin() || esSuyo();
+
+      // El operario crea SU parte, siempre pendiente y sin campos de oficina.
+      // El orden importa: primero hasAll, para no evaluar campos inexistentes.
+      allow create: if autenticado()
+                    && request.resource.data.keys().hasAll(['obra', 'creador', 'estado', 'timestamp'])
+                    && request.resource.data.keys().hasOnly(camposDelOperario())
+                    && request.resource.data.creador.lower() == correo()
+                    && request.resource.data.estado == 'pendiente';
+
+      // Nadie que no sea oficina modifica un parte. Ni siquiera su autor.
+      allow update: if esAdmin() && (
+                      // 1. pendiente: se valida, o se manda a la papelera
+                      (
+                        resource.data.get('estado', '') == 'pendiente'
+                        && tocados().hasOnly(camposDeValidacion())
+                        && request.resource.data.estado in ['pendiente', 'aprobado']
+                      )
+                      ||
+                      // 2. aprobado: congelado salvo el ciclo documental
+                      (
+                        resource.data.get('estado', '') == 'aprobado'
+                        && tocados().hasOnly(camposPostAprobacion())
+                        && request.resource.data.estado == 'aprobado'
+                      )
+                    );
+
+      // Borrado definitivo desde la papelera.
+      allow delete: if esAdmin();
+    }
+
+    // ------------------------------------------------------------ trabajadores
+
+    match /trabajadores/{trabajadorId} {
+      // El operario solo puede leer SU ficha (para resolver su nombre y su rol).
+      // Comparación en minúsculas: los documentos se guardan con email en
+      // minúsculas pero App.jsx:40 consulta con el email crudo de Auth.
+      function esSuFicha() {
+        return autenticado() && resource.data.get('email', '').lower() == correo();
+      }
+
+      allow get, list: if esAdmin() || esSuFicha();
+
+      // Solo oficina escribe aquí. Esto es lo que impide que nadie se toque su
+      // propio campo `rol`: un no-admin no puede escribir NADA en la colección.
+      allow create, update, delete: if esAdmin();
+    }
+
+    // -------------------------------------------------------------------- roles
+
+    // Fuente de verdad de los permisos. Cerrada a todo cliente: se mantiene desde
+    // la consola de Firebase o con el Admin SDK. Las reglas la leen con get(),
+    // que no pasa por estas reglas.
+    match /roles/{uid} {
+      allow read, write: if false;
+    }
+
+    // --------------------------------------------------- obras e inventario
+    // El operario necesita leerlas enteras para rellenar el parte
+    // (ParteTrabajo.jsx:42 y :45). Escribir, solo oficina.
+
+    match /obras/{obraId} {
+      allow get, list: if autenticado();
+      allow create, update, delete: if esAdmin();
+    }
+
+    match /inventario/{materialId} {
+      allow get, list: if autenticado();
+      allow create, update, delete: if esAdmin();
+    }
+
+    // ------------------------------------- documentos económicos: solo oficina
+
+    match /presupuestos/{presupuestoId} {
+      allow read, write: if esAdmin();
+    }
+
+    match /certificaciones/{certificacionId} {
+      allow read, write: if esAdmin();
+    }
+
+    match /facturas/{facturaId} {
+      allow read, write: if esAdmin();
+    }
+
+    // ------------------------------------------------- usuarios (colección legacy)
+    // Solo la lee App.jsx:53 como respaldo, con el uid del propio usuario.
+
+    match /usuarios/{uid} {
+      allow get: if autenticado() && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+
+    // ------------------------------------------------------- denegación por defecto
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
