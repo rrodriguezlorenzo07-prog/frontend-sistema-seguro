@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
 import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage'; 
+import { ref, uploadString } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
@@ -118,7 +118,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
     setMensaje({ texto: 'ENVIANDO DOCUMENTO...', tipo: 'warning' });
     
-    let firmaUrlFinal = null;
+    let rutaFirma = null;
     
     if (!firmaRef.current.isEmpty()) {
         try {
@@ -127,7 +127,11 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
             const firmaStorageRef = ref(storage, nombreArchivo);
             
             await uploadString(firmaStorageRef, base64Firma, 'data_url');
-            firmaUrlFinal = await getDownloadURL(firmaStorageRef);
+            // Se guarda la RUTA, no la URL de descarga: esa URL lleva un token
+            // permanente y acabaría circulando en cada lectura del parte. Además
+            // esto ahorra una llamada de red en el peor momento posible, con el
+            // operario en obra y mala cobertura.
+            rutaFirma = nombreArchivo;
         } catch (err) {
             console.error("Error al subir firma:", err);
             setMensaje({ texto: 'ERROR AL SUBIR LA FIRMA', tipo: 'error' });
@@ -147,7 +151,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         tareasRealizadas: tareasRealizadas, // Array estructurado: [{ubicacion, descripcion}]
         trabajo: trabajoLibre,
         materialesUsados: materialesUsados,
-        firma: firmaUrlFinal, 
+        firma: rutaFirma,
         creador: usuario.email, 
         nombreTrabajador: nombreOficial,
         fecha: new Date().toLocaleDateString(), 

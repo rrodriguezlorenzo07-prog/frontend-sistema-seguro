@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle, Trash2, Package, FileText, Clock, MapPin, Plus, Minus } from 'lucide-react';
+import { resolverFirmasDe } from '../../utils/firmas';
 
 export default function BandejaValidacion({
     partesPendientes,
@@ -19,6 +20,27 @@ export default function BandejaValidacion({
     abrirValidacion,
     btnBlackStyle
 }) {
+  // Las firmas se guardan como ruta de Storage. Se resuelven una vez al montar
+  // y se cachean en estado: así no se repite la descarga en cada render.
+  // null = todavía no se ha resuelto nada; un objeto = resolución terminada.
+  // Con un único estado, actualizado solo dentro del then, no hay ningún
+  // setState síncrono dentro del efecto.
+  const [firmas, setFirmas] = useState(null);
+
+  // partesPendientes es un array nuevo en cada render del panel, así que no sirve
+  // como dependencia: el efecto se relanzaría constantemente. Esta clave solo
+  // cambia cuando cambia lo que hay que resolver de verdad.
+  const claveFirmas = partesPendientes.map(p => p.id + ":" + (p.firma || "")).join("|");
+
+  useEffect(() => {
+      let cancelado = false;
+      resolverFirmasDe(partesPendientes.filter(p => p.firma)).then((mapa) => {
+          if (!cancelado) setFirmas(mapa);
+      });
+      return () => { cancelado = true; };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claveFirmas]);
+
   const btnPasoStyle = {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       width: '30px', height: '30px', padding: 0,
@@ -95,7 +117,11 @@ export default function BandejaValidacion({
                         {parte.firma && (
                             <div style={{ border: '1px solid #e5e7eb', padding: '10px', display: 'inline-block', backgroundColor: '#fff' }}>
                                 <p style={{ margin: '0 0 5px 0', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>Firma de Conformidad:</p>
-                                <img src={parte.firma} alt="Firma" style={{ height: '50px', objectFit: 'contain' }} />
+                                {firmas === null
+                                    ? <span style={{ fontSize: '11px', color: '#94a3b8' }}>Cargando firma…</span>
+                                    : (firmas[parte.id]
+                                        ? <img src={firmas[parte.id]} alt="Firma" style={{ height: '50px', objectFit: 'contain' }} />
+                                        : <span style={{ fontSize: '11px', color: '#94a3b8' }}>Firma no disponible</span>)}
                             </div>
                         )}
 

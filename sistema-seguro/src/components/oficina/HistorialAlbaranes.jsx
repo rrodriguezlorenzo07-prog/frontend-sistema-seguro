@@ -1,12 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileSpreadsheet, Eye, Download, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { resolverFirma } from '../../utils/firmas';
 
 export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportarPartesExcel, labelStyle, inputStyle, fechaInicio, setFechaInicio, fechaFin, setFechaFin, filtroBuscador, setFiltroBuscador, setLimitePartes, ordenPartes, setOrdenPartes, partesAMostrar, cargarMasPartes, hayMasPartes, cargandoMas, buscarPartesPorFechas }) {
   
   const [partePreview, setPartePreview] = useState(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
+
+  // La firma de la vista previa se resuelve al abrir el modal, no antes.
+  // Se guarda junto al id del parte al que pertenece, para no tener que ponerlo a
+  // null de forma síncrona al abrir otro: basta con comparar el id al pintar.
+  const [firmaPreview, setFirmaPreview] = useState({ id: null, dataUrl: null });
+  useEffect(() => {
+      let cancelado = false;
+      if (!partePreview?.firma) return undefined;
+      const idParte = partePreview.id;
+      resolverFirma(partePreview.firma).then((dataUrl) => {
+          if (!cancelado) setFirmaPreview({ id: idParte, dataUrl });
+      });
+      return () => { cancelado = true; };
+  }, [partePreview]);
 
   const convertirUrlABase64 = (url) => {
       return new Promise((resolve) => {
@@ -88,7 +103,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
 
           if (parte.firma) {
               doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text("FIRMA DE CONFORMIDAD:", 14, finalY);
-              const base64Firma = await convertirUrlABase64(parte.firma);
+              const base64Firma = await convertirUrlABase64(await resolverFirma(parte.firma));
               if (base64Firma) {
                   try { doc.addImage(base64Firma, 'PNG', 14, finalY + 5, 60, 30); } 
                   catch (e) { doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.text("(Firma digital registrada en servidor central)", 14, finalY + 15); }
@@ -156,7 +171,7 @@ export default function HistorialAlbaranes({ blockStyle, btnBlackStyle, exportar
                            <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
                                <p style={{ margin: '0 0 10px 0', fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Firma de Conformidad</p>
                                <div style={{ width: '100%', height: '120px', backgroundColor: '#fafafa', border: '1px dashed #1a1a1a', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                                   {partePreview.firma ? <img src={partePreview.firma} alt="Firma" style={{ maxHeight: '100px' }} /> : <span style={{ color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase' }}>Sin firma registrada</span>}
+                                   {partePreview.firma ? ((firmaPreview.id === partePreview.id && firmaPreview.dataUrl) ? <img src={firmaPreview.dataUrl} alt="Firma" style={{ maxHeight: '100px' }} /> : <span style={{ color: '#94a3b8', fontSize: '12px' }}>Cargando firma…</span>) : <span style={{ color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase' }}>Sin firma registrada</span>}
                                </div>
                            </div>
                       </div>
