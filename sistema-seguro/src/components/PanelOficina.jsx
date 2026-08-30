@@ -9,6 +9,7 @@ import autoTable from 'jspdf-autotable';
 
 import { horasTotalesDocumento } from '../utils/horasDocumento';
 import { HORAS_BASE_POR_DEFECTO } from '../utils/nomina';
+
 import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV, fechaParaNombre } from '../utils/csv';
 import { esDelDia } from '../utils/fechas';
 import BandejaValidacion from './oficina/BandejaValidacion';
@@ -440,23 +441,10 @@ export default function PanelOficina({ cambiarVista }) {
   const partesAMostrar = partesCoincidentes.slice(0, limitePartes);
   const materialesCoincidentes = materialesList.filter(m => m.nombre.toLowerCase().includes(filtroMateriales.toLowerCase())).sort((a, b) => { if (ordenMateriales === 'menor') return a.stock - b.stock; if (ordenMateriales === 'mayor') return b.stock - a.stock; return a.nombre.localeCompare(b.nombre); });
 
-  // Se agrupa por trabajadorId cuando existe, y si no por nombre, para que las
-  // cuadrillas antiguas sin id sigan contando. La clave del resumen lleva el id
-  // y el nombre, y ControlNominas cruza por el que tenga disponible.
-  const calcularHorasPorTrabajador = () => {
-      const resumen = {};
-      partesHistorialFiltradosFecha.forEach(parte => {
-          if (!parte.cuadrilla || parte.cuadrilla.length === 0) return;
-          parte.cuadrilla.forEach(op => {
-              const clave = op.trabajadorId || op.nombre;
-              if (!clave) return;
-              if (!resumen[clave]) resumen[clave] = { trabajadorId: op.trabajadorId || null, nombre: op.nombre, horasExtra: 0 };
-              resumen[clave].horasExtra += (Number(op.horasExtra) || 0);
-          });
-      });
-      return Object.entries(resumen).sort((a, b) => b[1].horasExtra - a[1].horasExtra);
-  };
-  const horasTrabajadores = calcularHorasPorTrabajador();
+  // El cálculo de horas extra del periodo vive ahora en ControlNominas: solo esa
+  // pantalla lo necesita y solo se monta cuando su pestaña está activa, así que la
+  // carga inicial del panel no paga por él.
+
   const obtenerEstadisticasHotel = (nombreHotel, obraId = null) => { const partesDelHotel = partesHistorial.filter(p => (obraId && p.obraId) ? p.obraId === obraId : p.obra === nombreHotel); let horasTotal = 0; const materialesMap = {}; partesDelHotel.forEach(p => { horasTotal += horasTotalesDocumento(p); if (p.materialesUsados && p.materialesUsados.length > 0) { p.materialesUsados.forEach(m => { materialesMap[m.nombre] = (materialesMap[m.nombre] || 0) + (Number(m.cantidad) || 0); }); } }); return { horas: horasTotal, materiales: Object.entries(materialesMap) }; };
 
   const exportarPartesExcel = () => {
@@ -672,7 +660,7 @@ export default function PanelOficina({ cambiarVista }) {
       {pestañaActiva === 'resumen' && ( <ResumenMetricas partesDeHoy={partesDeHoy} totalHorasHoy={totalHorasHoy} trabajadoresHoy={trabajadoresHoy} porcentajeGlobal={porcentajeGlobal} /> )}
       {pestañaActiva === 'obras' && ( <GestionProyectos blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevaObra={nuevaObra} setNuevaObra={setNuevaObra} numPlantas={numPlantas} setNumPlantas={setNumPlantas} configHabitaciones={configHabitaciones} setConfigHabitaciones={setConfigHabitaciones} generarHotelInteligente={generarHotelInteligente} obrasList={obrasActivas} obraActiva={obraActiva} setObraActiva={setObraActiva} borrarObra={borrarObra} obtenerEstadisticasHotel={obtenerEstadisticasHotel} marcarTareaHotel={marcarTareaHotel} /> )}
       {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarRolTrabajador={cambiarRolTrabajador} cambiandoRolId={cambiandoRolId} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} /> )}
-{pestañaActiva === 'horas' && ( <ControlNominas trabajadoresList={trabajadoresActivos} buscarPartesPorFechas={buscarPartesPorFechas} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} fechaInicio={fechaInicio} setFechaInicio={setFechaInicio} fechaFin={fechaFin} setFechaFin={setFechaFin} pagoHoraNormal={pagoHoraNormal} setPagoHoraNormal={setPagoHoraNormal} pagoHoraExtra={pagoHoraExtra} setPagoHoraExtra={setPagoHoraExtra} horasTrabajadores={horasTrabajadores} /> )}      {pestañaActiva === 'almacen' && ( <InventarioAlmacen blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} inputStyle={inputStyle} exportarAlmacenExcel={exportarAlmacenExcel} nuevoMatNombre={nuevoMatNombre} setNuevoMatNombre={setNuevoMatNombre} materialesList={materialesList} nuevoMatStock={nuevoMatStock} setNuevoMatStock={setNuevoMatStock} agregarMaterial={agregarMaterial} filtroMateriales={filtroMateriales} setFiltroMateriales={setFiltroMateriales} ordenMateriales={ordenMateriales} setOrdenMateriales={setOrdenMateriales} materialesCoincidentes={materialesCoincidentes} editandoMatId={editandoMatId} matEditado={matEditado} setMatEditado={setMatEditado} guardarEdicionMat={guardarEdicionMat} setEditandoMatId={setEditandoMatId} iniciarEdicionMat={iniciarEdicionMat} borrarMaterial={borrarMaterial} /> )}
+{pestañaActiva === 'horas' && ( <ControlNominas trabajadoresList={trabajadoresActivos} trabajadoresTodos={trabajadoresList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} pagoHoraNormal={pagoHoraNormal} setPagoHoraNormal={setPagoHoraNormal} pagoHoraExtra={pagoHoraExtra} setPagoHoraExtra={setPagoHoraExtra} pedirConfirmacion={pedirConfirmacion} mostrarToast={mostrarToast} /> )}      {pestañaActiva === 'almacen' && ( <InventarioAlmacen blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} inputStyle={inputStyle} exportarAlmacenExcel={exportarAlmacenExcel} nuevoMatNombre={nuevoMatNombre} setNuevoMatNombre={setNuevoMatNombre} materialesList={materialesList} nuevoMatStock={nuevoMatStock} setNuevoMatStock={setNuevoMatStock} agregarMaterial={agregarMaterial} filtroMateriales={filtroMateriales} setFiltroMateriales={setFiltroMateriales} ordenMateriales={ordenMateriales} setOrdenMateriales={setOrdenMateriales} materialesCoincidentes={materialesCoincidentes} editandoMatId={editandoMatId} matEditado={matEditado} setMatEditado={setMatEditado} guardarEdicionMat={guardarEdicionMat} setEditandoMatId={setEditandoMatId} iniciarEdicionMat={iniciarEdicionMat} borrarMaterial={borrarMaterial} /> )}
       {pestañaActiva === 'partes' && ( 
           <HistorialAlbaranes 
               blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} exportarPartesExcel={exportarPartesExcel} 

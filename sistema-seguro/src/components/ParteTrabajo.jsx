@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
-import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadString } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin } from 'lucide-react';
@@ -32,6 +32,9 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const [nombreOficial, setNombreOficial] = useState(usuario.email);
   const [trabajadorId, setTrabajadorId] = useState(null);
   const firmaRef = useRef(null);
+  // Identifica el envío en curso: evita que el acuse del servidor repinte un
+  // mensaje cuando el operario ya está con el parte siguiente.
+  const envioRef = useRef(0);
 
   const cargarMisPartes = useCallback(async () => {
     if (!usuario) return;
@@ -119,13 +122,14 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
     setMensaje({ texto: 'ENVIANDO DOCUMENTO...', tipo: 'warning' });
     
     let rutaFirma = null;
-    
+    let firmaSinSubir = false;
+
     if (!firmaRef.current.isEmpty()) {
+        const base64Firma = firmaRef.current.getCanvas().toDataURL('image/png');
         try {
-            const base64Firma = firmaRef.current.getCanvas().toDataURL('image/png');
             const nombreArchivo = `firmas/firma_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png`;
             const firmaStorageRef = ref(storage, nombreArchivo);
-            
+
             // El metadato `creador` es lo que permite a storage.rules saber de quién
             // es cada firma: el nombre del archivo no lo dice y las reglas no pueden
             // consultar Firestore por él. Se guarda en minúsculas para que la
@@ -140,10 +144,17 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
             // operario en obra y mala cobertura.
             rutaFirma = nombreArchivo;
         } catch (err) {
-            console.error("Error al subir firma:", err);
-            setMensaje({ texto: 'ERROR AL SUBIR LA FIRMA', tipo: 'error' });
-            setTimeout(() => setMensaje({ texto: '', tipo: '' }), 4000);
-            return; 
+            // Storage NO tiene cola offline; Firestore sí. Antes esto hacía return y
+            // se perdía el parte entero —obra, tareas, materiales y notas tecleadas a
+            // mano en la obra— por no poder subir una imagen de 3 KB.
+            //
+            // La firma viaja dentro del documento en base64. resolverFirma() ya trata
+            // ese formato, así que la oficina la ve igual, sin esperar a nada; y la
+            // Cloud Function subirFirmaPendiente la mueve a Storage en cuanto el parte
+            // llegue al servidor.
+            console.error("No se pudo subir la firma, viaja en el parte:", err);
+            rutaFirma = base64Firma;
+            firmaSinSubir = true;
         }
     }
 
@@ -167,17 +178,49 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         estado: 'pendiente'
     };
 
-    try {
-        await addDoc(collection(db, 'partes_de_trabajo'), payloadParte);
-        setMensaje({ texto: 'DOCUMENTO ENVIADO CON ÉXITO', tipo: 'success' });
-        
-        setObraSeleccionada(null); setEsOtraObra(false); setObraNombreManual('');
-        setTrabajoLibre(''); setTareasRealizadas([]); setMaterialesUsados([]);
-        firmaRef.current.clear();
-    } catch (error) { 
-        setMensaje({ texto: 'ERROR AL ENVIAR EL DOCUMENTO', tipo: 'error' }); 
-    }
-    setTimeout(() => setMensaje({ texto: '', tipo: '' }), 4000);
+    // NO se espera al servidor. Con persistentLocalCache la escritura es firme en
+    // IndexedDB en cuanto se llama, y Firestore garantiza el envío posterior aunque
+    // se cierre la aplicación. Sin cobertura, la promesa de addDoc no se rechaza:
+    // simplemente no se resuelve nunca, así que esperarla dejaba al operario mirando
+    // "ENVIANDO DOCUMENTO..." indefinidamente sobre un parte que ya estaba guardado
+    // —y probablemente volviendo a darle a enviar—.
+    const referencia = doc(collection(db, 'partes_de_trabajo'));
+    const confirmacionDelServidor = setDoc(referencia, payloadParte);
+
+    const envio = envioRef.current + 1;
+    envioRef.current = envio;
+
+    setMensaje({
+        texto: firmaSinSubir ? 'GUARDADO · PENDIENTE DE SINCRONIZAR' : 'PARTE GUARDADO',
+        tipo: firmaSinSubir ? 'warning' : 'success'
+    });
+
+    setObraSeleccionada(null); setEsOtraObra(false); setObraNombreManual('');
+    setTrabajoLibre(''); setTareasRealizadas([]); setMaterialesUsados([]);
+    firmaRef.current.clear();
+
+    confirmacionDelServidor
+        .then(() => {
+            // Llegó al servidor mientras el aviso seguía en pantalla: se afina. Si no
+            // llega, el mensaje que ya hay es correcto y el parte está a salvo igual.
+            if (envioRef.current === envio && !firmaSinSubir) {
+                setMensaje({ texto: 'DOCUMENTO ENVIADO CON ÉXITO', tipo: 'success' });
+            }
+        })
+        .catch((error) => {
+            // Un rechazo de verdad (reglas, datos inválidos) llega tarde, con el
+            // formulario ya limpio. Es el precio de no bloquear al operario.
+            console.error('El parte quedó guardado en el móvil pero el servidor lo rechazó:', error);
+            if (envioRef.current === envio) {
+                setMensaje({ texto: 'GUARDADO EN EL MÓVIL · EL SERVIDOR LO RECHAZÓ', tipo: 'error' });
+            }
+        });
+
+    setTimeout(() => {
+        // Invalida el envío: un acuse que llegue tardísimo ya no repinta nada.
+        envioRef.current += 1;
+        setMensaje({ texto: '', tipo: '' });
+    }, 4000);
   };
 
   const btnStyle = (activo) => ({

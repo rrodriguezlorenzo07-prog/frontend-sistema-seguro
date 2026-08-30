@@ -176,6 +176,57 @@ service cloud.firestore {
       allow read, write: if esAdmin();
     }
 
+    // ----------------------------------------------------------------- nominas
+    // Liquidaciones CERRADAS. Un snapshot congelado, no un cálculo en vivo: se crea
+    // una vez y no se modifica jamás.
+    //
+    // CADA CIERRE ES UN DOCUMENTO NUEVO. El id lleva dentro el periodo y la versión
+    // —"2026-08-v1", "2026-08-v2"— y el vigente es el de versión más alta. Corregir
+    // una liquidación no reescribe nada: emite la siguiente versión, y la anterior
+    // queda consultable. Que no se pueda sobrescribir no depende de ninguna
+    // comprobación: `create` solo se evalúa cuando el documento no existe, así que
+    // repetir un cierre falla aquí, sin código que lo impida.
+    //
+    // El periodo es un MES NATURAL. La fórmula de la nómina es base mensual menos
+    // ausencias: cerrar diez días con una base de 160 h no daría un número
+    // discutible, daría uno sin sentido.
+    //
+    // Las líneas NO exigen que su cabecera exista: cabecera y líneas se escriben en
+    // el mismo lote, y dentro de un lote exists() ve el estado anterior. Pedirlo
+    // haría imposible el primer cierre.
+
+    match /nominas/{cierreId} {
+      allow read: if esAdmin();
+
+      allow create: if esAdmin()
+                    && request.resource.data.estado == 'cerrado'
+                    && request.resource.data.cerradoPor == request.auth.uid
+                    && request.resource.data.periodo.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+                    && request.resource.data.version is int
+                    && request.resource.data.version > 0
+                    && cierreId == request.resource.data.periodo + '-v' + string(request.resource.data.version)
+                    && request.resource.data.rangoInicio is int
+                    && request.resource.data.rangoFin is int
+                    && request.resource.data.rangoInicio <= request.resource.data.rangoFin
+                    && request.resource.data.totales is map;
+
+      allow update, delete: if false;
+
+      // Una línea por trabajador. El id del documento es su trabajadorId, así que
+      // un mismo trabajador no puede aparecer dos veces en el mismo cierre.
+      match /lineas/{trabajadorId} {
+        allow read: if esAdmin();
+
+        allow create: if esAdmin()
+                      && request.resource.data.trabajadorId == trabajadorId
+                      && request.resource.data.horasNormales is number
+                      && request.resource.data.horasExtra is number
+                      && request.resource.data.total is number;
+
+        allow update, delete: if false;
+      }
+    }
+
     // ------------------------------------------------- usuarios (colección legacy)
     // Solo la lee App.jsx:53 como respaldo, con el uid del propio usuario.
 

@@ -85,15 +85,29 @@ async function main() {
   await comprobar('admin crea un parte propio', () =>
     assertSucceeds(setDoc(doc(admin, 'partes_de_trabajo/parte-admin'), parteDeOperario(EMAIL_ADMIN)))
   );
+  // La cuadrilla y las horas extra NO viajan en el parte desde la Fase D.2: viven en
+  // validaciones/{parteId}, fuera del alcance de su autor. Este caso escribía los dos
+  // campos y por eso fallaba: no era un fallo de las reglas, era el test quedándose
+  // atrás respecto a ellas.
   await comprobar('admin valida el parte (pendiente -> aprobado)', () =>
     assertSucceeds(updateDoc(doc(admin, 'partes_de_trabajo/parte-op1'), {
       estado: 'aprobado',
-      cuadrilla: [{ nombre: 'Juan', horasExtra: 1.5 }],
-      horasExtraAsignadas: 1.5,
       fechaValidacion: '29/08/2026',
       certificado: false,
       facturado: false,
       papelera: false
+    }))
+  );
+  await comprobar('la cuadrilla va aparte, en validaciones/{parteId}', () =>
+    assertSucceeds(setDoc(doc(admin, 'validaciones/parte-op1'), {
+      cuadrilla: [{ trabajadorId: 't-op1', nombre: 'Juan', horasExtra: 1.5 }],
+      horasExtraAsignadas: 1.5,
+      timestamp: Date.now()
+    }))
+  );
+  await comprobar('y NO se puede colar dentro del parte', () =>
+    assertFails(updateDoc(doc(admin, 'partes_de_trabajo/parte-op1'), {
+      cuadrilla: [{ nombre: 'Juan', horasExtra: 99 }]
     }))
   );
   await comprobar('admin crea la certificación', () =>
@@ -102,6 +116,26 @@ async function main() {
       totalHoras: 9.5, fecha: '29/08/2026', timestamp: Date.now(),
       facturado: false, papelera: false
     }))
+  );
+
+  // ---- CASO 1b ------------------------------------------------------------
+  titulo('Operario sin cobertura envía el parte con la firma incrustada → debe pasar');
+  // Es la premisa del arreglo de la pérdida de parte: cuando Storage no responde, la
+  // firma viaja en base64 dentro del campo `firma`. Si las reglas no lo aceptaran, el
+  // parte se seguiría perdiendo, solo que más tarde y en silencio.
+  await comprobar('el parte con firma en base64 se crea igual', () =>
+    assertSucceeds(setDoc(doc(op1, 'partes_de_trabajo/parte-sin-cobertura'), {
+      ...parteDeOperario(EMAIL_OP1),
+      firma: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
+    }))
+  );
+  await comprobar('y sin firma ninguna también', () =>
+    assertSucceeds(setDoc(doc(op1, 'partes_de_trabajo/parte-sin-firma'), {
+      ...parteDeOperario(EMAIL_OP1), firma: null
+    }))
+  );
+  await comprobar('pero el operario NO puede cambiarla después', () =>
+    assertFails(updateDoc(doc(op1, 'partes_de_trabajo/parte-sin-cobertura'), { firma: 'firmas/otra.png' }))
   );
 
   // ---- CASO 2 -------------------------------------------------------------
