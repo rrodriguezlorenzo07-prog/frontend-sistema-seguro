@@ -89,6 +89,8 @@ export default function PanelOficina({ cambiarVista }) {
   const [presuPrecioHora, setPresuPrecioHora] = useState('');
 
   const [certObraSeleccionada, setCertObraSeleccionada] = useState('');
+  // Id de la obra seleccionada para certificar, resuelto desde su nombre.
+  const certObraId = obrasList.find(o => o.nombre === certObraSeleccionada)?.id ?? null;
   const [certPartesSeleccionados, setCertPartesSeleccionados] = useState([]);
 
   const [modoFacturacion, setModoFacturacion] = useState('albaranes'); 
@@ -286,8 +288,17 @@ export default function PanelOficina({ cambiarVista }) {
       return false;
   };
 
-  const abrirValidacion = (parte) => { setParteAValidar(parte); setCuadrilla([{ nombre: parte.nombreTrabajador || parte.creador, horasExtra: 0 }]); };
-  const agregarOperarioCuadrilla = () => { if(!nuevoOperario) return; if(cuadrilla.some(op => op.nombre === nuevoOperario)) return; setCuadrilla([...cuadrilla, { nombre: nuevoOperario, horasExtra: 0 }]); setNuevoOperario(''); };
+  const abrirValidacion = (parte) => { setParteAValidar(parte); setCuadrilla([{ trabajadorId: parte.trabajadorId ?? trabajadoresList.find(t => t.email === parte.creador)?.id ?? null, nombre: parte.nombreTrabajador || parte.creador, horasExtra: 0 }]); };
+  // nuevoOperario es ahora el id del trabajador, no su nombre. El nombre se guarda
+  // igualmente: es el registro histórico del albarán.
+  const agregarOperarioCuadrilla = () => {
+      if (!nuevoOperario) return;
+      if (cuadrilla.some(op => op.trabajadorId === nuevoOperario)) return;
+      const trabajador = trabajadoresList.find(t => t.id === nuevoOperario);
+      if (!trabajador) return;
+      setCuadrilla([...cuadrilla, { trabajadorId: trabajador.id, nombre: trabajador.nombre, horasExtra: 0 }]);
+      setNuevoOperario('');
+  };
   const cambiarHorasExtra = (index, cantidad) => { const nueva = [...cuadrilla]; const actual = Number(nueva[index].horasExtra) || 0; nueva[index] = { ...nueva[index], horasExtra: Math.max(0, actual + cantidad) }; setCuadrilla(nueva); };
   const setHorasExtraDirecto = (index, valor) => { const nueva = [...cuadrilla]; nueva[index] = { ...nueva[index], horasExtra: valor === '' ? '' : Math.max(0, parseFloat(valor) || 0) }; setCuadrilla(nueva); };
   const quitarOperario = (index) => { const nueva = [...cuadrilla]; nueva.splice(index, 1); setCuadrilla(nueva); };
@@ -356,7 +367,9 @@ export default function PanelOficina({ cambiarVista }) {
               materialesUsados.map((mat) => getDoc(doc(db, 'inventario', mat.id)))
           );
           if (parteAValidar.tareasRealizadas && parteAValidar.tareasRealizadas.length > 0 && parteAValidar.obra) {
-              const obraAsociada = obrasList.find(o => o.nombre === parteAValidar.obra);
+              const obraAsociada = parteAValidar.obraId
+                      ? obrasList.find(o => o.id === parteAValidar.obraId)
+                      : obrasList.find(o => o.nombre === parteAValidar.obra);
               if (obraAsociada && obraAsociada.tareas) {
                   let huboCambios = false;
                   const tareasActualizadas = obraAsociada.tareas.map(tarea => {
@@ -369,7 +382,7 @@ export default function PanelOficina({ cambiarVista }) {
               }
           }
           // Solo horas extra: las normales son base mensual fija y nunca se derivan de un parte.
-          const cuadrillaNumerica = cuadrilla.map(op => ({ nombre: op.nombre, horasExtra: Number(op.horasExtra) || 0 }));
+          const cuadrillaNumerica = cuadrilla.map(op => ({ trabajadorId: op.trabajadorId ?? null, nombre: op.nombre, horasExtra: Number(op.horasExtra) || 0 }));
           const horasExtraAsignadas = cuadrillaNumerica.reduce((sum, op) => sum + op.horasExtra, 0);
           // Campos nuevos: no se pisa ninguno de los que escribe el operario.
           const fechaValidacion = new Date().toLocaleDateString();
@@ -386,6 +399,7 @@ export default function PanelOficina({ cambiarVista }) {
               horasExtraAsignadas,
               timestamp: Number(parteAValidar.timestamp) || Date.now(),
               obra: parteAValidar.obra ?? null,
+              obraId: parteAValidar.obraId ?? null,
               fechaValidacion
           }, { merge: true });
           await lote.commit();
@@ -426,9 +440,24 @@ export default function PanelOficina({ cambiarVista }) {
   const partesAMostrar = partesCoincidentes.slice(0, limitePartes);
   const materialesCoincidentes = materialesList.filter(m => m.nombre.toLowerCase().includes(filtroMateriales.toLowerCase())).sort((a, b) => { if (ordenMateriales === 'menor') return a.stock - b.stock; if (ordenMateriales === 'mayor') return b.stock - a.stock; return a.nombre.localeCompare(b.nombre); });
 
-  const calcularHorasPorTrabajador = () => { const resumen = {}; partesHistorialFiltradosFecha.forEach(parte => { if (parte.cuadrilla && parte.cuadrilla.length > 0) { parte.cuadrilla.forEach(op => { if(!resumen[op.nombre]) resumen[op.nombre] = { horasExtra: 0 }; resumen[op.nombre].horasExtra += (Number(op.horasExtra) || 0); }); } }); return Object.entries(resumen).sort((a, b) => b[1].horasExtra - a[1].horasExtra); };
+  // Se agrupa por trabajadorId cuando existe, y si no por nombre, para que las
+  // cuadrillas antiguas sin id sigan contando. La clave del resumen lleva el id
+  // y el nombre, y ControlNominas cruza por el que tenga disponible.
+  const calcularHorasPorTrabajador = () => {
+      const resumen = {};
+      partesHistorialFiltradosFecha.forEach(parte => {
+          if (!parte.cuadrilla || parte.cuadrilla.length === 0) return;
+          parte.cuadrilla.forEach(op => {
+              const clave = op.trabajadorId || op.nombre;
+              if (!clave) return;
+              if (!resumen[clave]) resumen[clave] = { trabajadorId: op.trabajadorId || null, nombre: op.nombre, horasExtra: 0 };
+              resumen[clave].horasExtra += (Number(op.horasExtra) || 0);
+          });
+      });
+      return Object.entries(resumen).sort((a, b) => b[1].horasExtra - a[1].horasExtra);
+  };
   const horasTrabajadores = calcularHorasPorTrabajador();
-  const obtenerEstadisticasHotel = (nombreHotel) => { const partesDelHotel = partesHistorial.filter(p => p.obra === nombreHotel); let horasTotal = 0; const materialesMap = {}; partesDelHotel.forEach(p => { horasTotal += horasTotalesDocumento(p); if (p.materialesUsados && p.materialesUsados.length > 0) { p.materialesUsados.forEach(m => { materialesMap[m.nombre] = (materialesMap[m.nombre] || 0) + (Number(m.cantidad) || 0); }); } }); return { horas: horasTotal, materiales: Object.entries(materialesMap) }; };
+  const obtenerEstadisticasHotel = (nombreHotel, obraId = null) => { const partesDelHotel = partesHistorial.filter(p => (obraId && p.obraId) ? p.obraId === obraId : p.obra === nombreHotel); let horasTotal = 0; const materialesMap = {}; partesDelHotel.forEach(p => { horasTotal += horasTotalesDocumento(p); if (p.materialesUsados && p.materialesUsados.length > 0) { p.materialesUsados.forEach(m => { materialesMap[m.nombre] = (materialesMap[m.nombre] || 0) + (Number(m.cantidad) || 0); }); } }); return { horas: horasTotal, materiales: Object.entries(materialesMap) }; };
 
   const exportarPartesExcel = () => {
       const cabeceras = ['Fecha', 'Operarios (H. Extra)', 'Horas Extra', 'Hotel/Obra', 'Material Utilizado', 'Trabajo Realizado'];
@@ -455,7 +484,7 @@ export default function PanelOficina({ cambiarVista }) {
       mostrarToast("Excel generado");
   };
 
-  const partesPendientesCertificar = partesHistorial.filter(p => p.obra === certObraSeleccionada && p.certificado !== true && p.facturado !== true);
+  const partesPendientesCertificar = partesHistorial.filter(p => (certObraId && p.obraId ? p.obraId === certObraId : p.obra === certObraSeleccionada) && p.certificado !== true && p.facturado !== true);
   const toggleParteCertificacion = (id) => { setCertPartesSeleccionados(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 
   const borrarCertificacion = (id, partesIds) => { pedirConfirmacion("Anular Certificación", "Al anular, los albaranes quedan libres. La certificación irá a la papelera.", async () => { await updateDoc(doc(db, 'certificaciones', id), { papelera: true }); for (let pId of partesIds) { await updateDoc(doc(db, 'partes_de_trabajo', pId), { certificado: false, idCertificacion: null }); } cargarDatos(); mostrarToast("Certificación en la papelera."); }); };

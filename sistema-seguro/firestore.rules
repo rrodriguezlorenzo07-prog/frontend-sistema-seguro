@@ -56,7 +56,8 @@ service cloud.firestore {
       // Coincide exactamente con el payload de ParteTrabajo.jsx:130-142.
       function camposDelOperario() {
         return ['obra', 'tareasRealizadas', 'trabajo', 'materialesUsados', 'firma',
-                'creador', 'nombreTrabajador', 'fecha', 'hora', 'timestamp', 'estado'];
+                'creador', 'nombreTrabajador', 'fecha', 'hora', 'timestamp', 'estado',
+                'obraId', 'trabajadorId'];
       }
 
       // Lo que la oficina escribe al validar (PanelOficina.jsx:251).

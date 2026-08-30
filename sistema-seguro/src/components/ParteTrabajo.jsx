@@ -30,6 +30,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const [misPartes, setMisPartes] = useState([]);
   
   const [nombreOficial, setNombreOficial] = useState(usuario.email);
+  const [trabajadorId, setTrabajadorId] = useState(null);
   const firmaRef = useRef(null);
 
   const cargarMisPartes = useCallback(async () => {
@@ -48,7 +49,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
           getDocs(collection(db, 'obras')),
           getDocs(collection(db, 'inventario'))
         ]);
-        if (!resTrab.empty) { setNombreOficial(resTrab.docs[0].data().nombre); }
+        if (!resTrab.empty) { setNombreOficial(resTrab.docs[0].data().nombre); setTrabajadorId(resTrab.docs[0].id); }
         setObrasList(resObras.docs.map(d => ({ id: d.id, ...d.data() })));
         setInventario(resInv.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (error) { console.error("Error:", error); }
@@ -138,7 +139,11 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
     const nombreFinalObra = esOtraObra ? obraNombreManual : obraSeleccionada?.nombre;
 
     const payloadParte = {
-        obra: nombreFinalObra, 
+        obra: nombreFinalObra,
+        // Referencias por id junto al nombre. Si la obra se escribió a mano,
+        // obraId queda en null a propósito: es texto libre, no un proyecto del catálogo.
+        obraId: esOtraObra ? null : (obraSeleccionada?.id ?? null),
+        trabajadorId,
         tareasRealizadas: tareasRealizadas, // Array estructurado: [{ubicacion, descripcion}]
         trabajo: trabajoLibre,
         materialesUsados: materialesUsados,

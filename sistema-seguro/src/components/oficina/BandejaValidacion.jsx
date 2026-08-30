@@ -107,7 +107,7 @@ export default function BandejaValidacion({
                                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
                                     <select value={nuevoOperario} onChange={(e)=>setNuevoOperario(e.target.value)} style={{ flex: 1, padding: '10px', border: '1px solid #1a1a1a', outline: 'none' }}>
                                         <option value="">-- Seleccionar operario --</option>
-                                        {trabajadoresList.map(t => <option key={t.id} value={t.nombre}>{t.nombre}</option>)}
+                                        {trabajadoresList.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
                                     </select>
                                     <button onClick={agregarOperarioCuadrilla} style={btnBlackStyle}>Añadir</button>
                                 </div>

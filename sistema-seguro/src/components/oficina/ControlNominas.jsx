@@ -42,13 +42,18 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
       }));
   };
 
-  const listaBase = trabajadoresList && trabajadoresList.length > 0 ? trabajadoresList : horasTrabajadores.map(h => ({ nombre: h[0] }));
+  const listaBase = trabajadoresList && trabajadoresList.length > 0 ? trabajadoresList : horasTrabajadores.map(h => ({ id: h[1].trabajadorId || null, nombre: h[1].nombre || h[0] }));
 
   const datosCalculados = listaBase.map(trab => {
       const nombre = trab.nombre;
 
       // De los partes SOLO se toman las horas extra. Las normales jamás se derivan de un albarán.
-      const datosPartes = horasTrabajadores.find(h => h[0] === nombre);
+      // Cruce por trabajadorId cuando la cuadrilla lo tiene; si no, por nombre.
+      // Así un trabajador renombrado conserva sus horas extra, que era el fallo
+      // más caro del hallazgo 2.2. La fórmula de cálculo no cambia.
+      const datosPartes = horasTrabajadores.find(h =>
+          (trab.id && h[1].trabajadorId) ? h[1].trabajadorId === trab.id : h[0] === nombre
+      );
       const origE = datosPartes ? datosPartes[1].horasExtra : 0;
 
       const dLibres = diasAusencia[nombre] || 0;

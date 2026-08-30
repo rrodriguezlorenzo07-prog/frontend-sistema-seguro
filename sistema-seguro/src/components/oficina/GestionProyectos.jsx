@@ -131,7 +131,7 @@ export default function GestionProyectos({ blockStyle, labelStyle, inputStyle, b
                 
                 {/* ESTADÍSTICAS GLOBALES */}
                 {(() => {
-                    const stats = obtenerEstadisticasHotel(obraActiva.nombre);
+                    const stats = obtenerEstadisticasHotel(obraActiva.nombre, obraActiva.id);
                     return (
                         <div style={{ display: 'flex', gap: '20px', marginBottom: '25px', flexWrap: 'wrap' }}>
                             <div style={{ padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#ffffff', minWidth: '150px' }}>
