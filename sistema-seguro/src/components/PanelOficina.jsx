@@ -1,3 +1,4 @@
+// @ts-check
 import { useState, useEffect, useCallback } from 'react';
 import { db, auth, authSecundario, functions } from '../firebase'; 
 import { httpsCallable } from 'firebase/functions';
@@ -11,7 +12,10 @@ import { horasTotalesDocumento } from '../utils/horasDocumento';
 import { HORAS_BASE_POR_DEFECTO } from '../utils/nomina';
 
 import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV, fechaParaNombre } from '../utils/csv';
-import { esDelDia } from '../utils/fechas';
+import { hidratarPartes, rangoDeFechas, filtrarPorRango, buscarPartes, resumenDelDia, marcarFacturados } from '../logica/partes';
+import { cuadrillaInicial, agregarOperario, ajustarHorasExtra, fijarHorasExtra, quitarOperario, normalizarCuadrilla } from '../logica/cuadrilla';
+import { ubicacionCoincideConTarea, generarTareasDeHotel, alternarTareas, progresoDeObras, estadisticasDeObra } from '../logica/obras';
+import { filtrarMateriales } from '../logica/inventario';
 import BandejaValidacion from './oficina/BandejaValidacion';
 import ResumenMetricas from './oficina/ResumenMetricas';
 import GestionProyectos from './oficina/GestionProyectos';
@@ -33,7 +37,6 @@ export default function PanelOficina({ cambiarVista }) {
   const [partes, setPartes] = useState([]);
   const [obrasList, setObrasList] = useState([]);
   const [materialesList, setMaterialesList] = useState([]);
-  const [presupuestosList, setPresupuestosList] = useState([]); 
   const [trabajadoresList, setTrabajadoresList] = useState([]);
   const [certificacionesList, setCertificacionesList] = useState([]);
   const [facturasList, setFacturasList] = useState([]);
@@ -81,13 +84,6 @@ export default function PanelOficina({ cambiarVista }) {
   const [editandoMatId, setEditandoMatId] = useState(null);
   const [matEditado, setMatEditado] = useState({});
 
-  const [presuCliente, setPresuCliente] = useState('');
-  const [presuItems, setPresuItems] = useState([]); 
-  const [presuSelectMat, setPresuSelectMat] = useState('');
-  const [presuCantMat, setPresuCantMat] = useState(1);
-  const [presuPrecioMat, setPresuPrecioMat] = useState('');
-  const [presuHoras, setPresuHoras] = useState('');
-  const [presuPrecioHora, setPresuPrecioHora] = useState('');
 
   const [certObraSeleccionada, setCertObraSeleccionada] = useState('');
   // Id de la obra seleccionada para certificar, resuelto desde su nombre.
@@ -116,7 +112,6 @@ export default function PanelOficina({ cambiarVista }) {
 
   // Consultas reutilizadas por la carga inicial y por los refrescos puntuales.
   const consultaPartes = () => query(collection(db, 'partes_de_trabajo'), orderBy('timestamp', 'desc'), limit(TAMANO_PAGINA));
-  const consultaPresupuestos = () => query(collection(db, 'presupuestos'), orderBy('timestamp', 'desc'), limit(LIMITE_DOCUMENTOS));
   const consultaCertificaciones = () => query(collection(db, 'certificaciones'), orderBy('timestamp', 'desc'), limit(LIMITE_DOCUMENTOS));
   const consultaFacturas = () => query(collection(db, 'facturas'), orderBy('timestamp', 'desc'), limit(LIMITE_DOCUMENTOS));
   const consultaValidaciones = () => query(collection(db, 'validaciones'), orderBy('timestamp', 'desc'), limit(TAMANO_PAGINA));
@@ -125,16 +120,6 @@ export default function PanelOficina({ cambiarVista }) {
 
   const mapaDe = (snap) => new Map(snap.docs.map((d) => [d.id, d.data()]));
 
-  // La cuadrilla y las horas extra viven en validaciones/{parteId}, fuera del parte,
-  // para que el operario no vea las de sus compañeros al leer su propio parte.
-  // Aquí se fusionan en memoria: aguas abajo el objeto tiene la forma de siempre.
-  const hidratar = (partes, validaciones) => {
-      if (!validaciones || validaciones.size === 0) return partes;
-      return partes.map((p) => {
-          const v = validaciones.get(p.id);
-          return v ? { ...p, cuadrilla: v.cuadrilla, horasExtraAsignadas: v.horasExtraAsignadas } : p;
-      });
-  };
 
   // Para páginas arbitrarias (búsqueda por fechas, cargar más): se piden las
   // validaciones del mismo rango de timestamps que la página ya cargada.
@@ -162,19 +147,16 @@ export default function PanelOficina({ cambiarVista }) {
   const refrescarInventario = async () => {
       setMaterialesList(mapear(await getDocs(collection(db, 'inventario'))));
   };
-  const refrescarPresupuestos = async () => {
-      setPresupuestosList(mapear(await getDocs(consultaPresupuestos())));
-  };
+
 
   const cargarDatos = useCallback(async () => {
     setCargando(true);
     try {
-      // Las siete consultas van en paralelo: antes eran siete await encadenados.
-      const [snapPartes, snapObras, snapMateriales, snapPresu, snapTrab, snapCert, snapFacturas, snapValidaciones] = await Promise.all([
+      // Las consultas van en paralelo: antes eran una cadena de await.
+      const [snapPartes, snapObras, snapMateriales, snapTrab, snapCert, snapFacturas, snapValidaciones] = await Promise.all([
         getDocs(consultaPartes()),
         getDocs(collection(db, 'obras')),
         getDocs(collection(db, 'inventario')),
-        getDocs(consultaPresupuestos()),
         getDocs(collection(db, 'trabajadores')),
         getDocs(consultaCertificaciones()),
         getDocs(consultaFacturas()),
@@ -183,7 +165,7 @@ export default function PanelOficina({ cambiarVista }) {
 
       if (!snapPartes.empty) {
           setUltimoDocPartes(snapPartes.docs[snapPartes.docs.length - 1]);
-          setPartes(hidratar(mapear(snapPartes), mapaDe(snapValidaciones)));
+          setPartes(hidratarPartes(mapear(snapPartes), mapaDe(snapValidaciones)));
           setHayMasPartes(snapPartes.docs.length === TAMANO_PAGINA);
       } else {
           setPartes([]); setUltimoDocPartes(null); setHayMasPartes(false);
@@ -195,7 +177,6 @@ export default function PanelOficina({ cambiarVista }) {
       setObraActiva(prev => (prev ? listaObrasFrescas.find(o => o.id === prev.id) || prev : null));
 
       setMaterialesList(mapear(snapMateriales));
-      setPresupuestosList(mapear(snapPresu));
       setTrabajadoresList(mapear(snapTrab).sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setCertificacionesList(mapear(snapCert));
       setFacturasList(mapear(snapFacturas));
@@ -215,7 +196,7 @@ export default function PanelOficina({ cambiarVista }) {
           const res = await getDocs(q);
           if (!res.empty) {
               setUltimoDocPartes(res.docs[res.docs.length - 1]);
-              const nuevos = hidratar(mapear(res), await traerValidacionesDe(mapear(res)));
+              const nuevos = hidratarPartes(mapear(res), await traerValidacionesDe(mapear(res)));
               setPartes(prev => [...prev, ...nuevos]);
               if (res.docs.length < TAMANO_PAGINA) setHayMasPartes(false);
           } else { setHayMasPartes(false); }
@@ -241,7 +222,7 @@ export default function PanelOficina({ cambiarVista }) {
           const q = query(collection(db, 'partes_de_trabajo'), where('timestamp', '>=', start), where('timestamp', '<=', end), orderBy('timestamp', 'desc'), limit(TAMANO_PAGINA));
           const snap = await getDocs(q);
           const partesPagina = mapear(snap);
-          setPartes(hidratar(partesPagina, await traerValidacionesDe(partesPagina)));
+          setPartes(hidratarPartes(partesPagina, await traerValidacionesDe(partesPagina)));
           setUltimoDocPartes(snap.empty ? null : snap.docs[snap.docs.length - 1]);
           setHayMasPartes(snap.docs.length === TAMANO_PAGINA);
           setModoBusqueda(true);
@@ -263,46 +244,19 @@ export default function PanelOficina({ cambiarVista }) {
   const partesPendientes = partesActivos.filter(p => p.estado === 'pendiente');
   const partesHistorial = partesActivos.filter(p => p.estado === 'aprobado');
 
-  // Emparejador de ubicaciones replicado de GestionProyectos.jsx (abrirModalHabitacion).
-  // No se importa de allí porque allí vive en línea dentro del componente; unificar ambos
-  // es tarea del futuro módulo de lógica compartida.
-  // Diferencia deliberada: se prioriza tarea.numeroHabitacion cuando existe, para no arrastrar
-  // el número de planta del nombre ("P1 - Hab 101" -> [1, 101]) al emparejamiento.
-  const ubicacionCoincideConTarea = (tarea, ubicacion) => {
-      const nombreHab = (tarea.nombre || '').toLowerCase().trim();
-      const ubic = (ubicacion || '').toLowerCase().trim();
-      if (!ubic || !nombreHab) return false;
-      if (ubic.includes(nombreHab) || nombreHab.includes(ubic)) return true;
 
-      const numerosCaja = tarea.numeroHabitacion !== undefined ? [Number(tarea.numeroHabitacion)] : (nombreHab.match(/\d+/g)?.map(Number) || []);
-      const numerosInput = ubic.match(/\d+/g)?.map(Number) || [];
-      const rangos = [...ubic.matchAll(/(\d+)\s*(?:-|al|a)\s*(\d+)/g)];
-
-      for (const numCaja of numerosCaja) {
-          if (numerosInput.includes(numCaja)) return true;
-          for (const rango of rangos) {
-              const inicio = Math.min(Number(rango[1]), Number(rango[2]));
-              const fin = Math.max(Number(rango[1]), Number(rango[2]));
-              if (numCaja >= inicio && numCaja <= fin) return true;
-          }
-      }
-      return false;
-  };
-
-  const abrirValidacion = (parte) => { setParteAValidar(parte); setCuadrilla([{ trabajadorId: parte.trabajadorId ?? trabajadoresList.find(t => t.email === parte.creador)?.id ?? null, nombre: parte.nombreTrabajador || parte.creador, horasExtra: 0 }]); };
+  const abrirValidacion = (parte) => { setParteAValidar(parte); setCuadrilla(cuadrillaInicial(parte, trabajadoresList)); };
   // nuevoOperario es ahora el id del trabajador, no su nombre. El nombre se guarda
   // igualmente: es el registro histórico del albarán.
   const agregarOperarioCuadrilla = () => {
-      if (!nuevoOperario) return;
-      if (cuadrilla.some(op => op.trabajadorId === nuevoOperario)) return;
-      const trabajador = trabajadoresList.find(t => t.id === nuevoOperario);
-      if (!trabajador) return;
-      setCuadrilla([...cuadrilla, { trabajadorId: trabajador.id, nombre: trabajador.nombre, horasExtra: 0 }]);
+      const nueva = agregarOperario(cuadrilla, nuevoOperario, trabajadoresList);
+      if (nueva === cuadrilla) return;
+      setCuadrilla(nueva);
       setNuevoOperario('');
   };
-  const cambiarHorasExtra = (index, cantidad) => { const nueva = [...cuadrilla]; const actual = Number(nueva[index].horasExtra) || 0; nueva[index] = { ...nueva[index], horasExtra: Math.max(0, actual + cantidad) }; setCuadrilla(nueva); };
-  const setHorasExtraDirecto = (index, valor) => { const nueva = [...cuadrilla]; nueva[index] = { ...nueva[index], horasExtra: valor === '' ? '' : Math.max(0, parseFloat(valor) || 0) }; setCuadrilla(nueva); };
-  const quitarOperario = (index) => { const nueva = [...cuadrilla]; nueva.splice(index, 1); setCuadrilla(nueva); };
+  const cambiarHorasExtra = (index, cantidad) => setCuadrilla(ajustarHorasExtra(cuadrilla, index, cantidad));
+  const setHorasExtraDirecto = (index, valor) => setCuadrilla(fijarHorasExtra(cuadrilla, index, valor));
+  const quitarDeLaCuadrilla = (index) => setCuadrilla(quitarOperario(cuadrilla, index));
 
   const registrarTrabajador = async () => { if(!nuevoTrabajadorNombre) { mostrarToast("Escribe el nombre del trabajador.", "error"); return; } try { if (nuevoTrabajadorEmail && nuevoTrabajadorPass) { if (nuevoTrabajadorPass.length < 6) { mostrarToast("La contraseña debe tener al menos 6 caracteres.", "error"); return; } const credenciales = await createUserWithEmailAndPassword(authSecundario, nuevoTrabajadorEmail, nuevoTrabajadorPass); await sendEmailVerification(credenciales.user); } await addDoc(collection(db, 'trabajadores'), { nombre: nuevoTrabajadorNombre.trim(), email: nuevoTrabajadorEmail.trim().toLowerCase(), rol: 'operario', papelera: false, horasBaseMensuales: HORAS_BASE_POR_DEFECTO }); setNuevoTrabajadorNombre(''); setNuevoTrabajadorEmail(''); setNuevoTrabajadorPass(''); refrescarTrabajadores(); mostrarToast("Trabajador registrado en plantilla."); } catch (error) { mostrarToast("Error: " + error.message, "error"); } };
   
@@ -383,8 +337,7 @@ export default function PanelOficina({ cambiarVista }) {
               }
           }
           // Solo horas extra: las normales son base mensual fija y nunca se derivan de un parte.
-          const cuadrillaNumerica = cuadrilla.map(op => ({ trabajadorId: op.trabajadorId ?? null, nombre: op.nombre, horasExtra: Number(op.horasExtra) || 0 }));
-          const horasExtraAsignadas = cuadrillaNumerica.reduce((sum, op) => sum + op.horasExtra, 0);
+          const { cuadrilla: cuadrillaNumerica, horasExtraAsignadas } = normalizarCuadrilla(cuadrilla);
           // Campos nuevos: no se pisa ninguno de los que escribe el operario.
           const fechaValidacion = new Date().toLocaleDateString();
           // El parte y su validación se escriben en el mismo lote: nunca puede quedar
@@ -412,11 +365,10 @@ export default function PanelOficina({ cambiarVista }) {
       }
   };
 
-  const generarHotelInteligente = async () => { if(!nuevaObra) { mostrarToast("Introduce un nombre para el proyecto.", "error"); return; } let configs = configHabitaciones.split(',').map(s => parseInt(s.trim()) || 0); let tareasGeneradas = []; for (let p = 1; p <= numPlantas; p++) { let habsEnEstaPlanta = configs[p-1] || configs[0] || 10; for (let h = 1; h <= habsEnEstaPlanta; h++) { let numHab = p * 100 + h; tareasGeneradas.push({ id: `T-${p}-${h}-${Date.now()}`, nombre: `P${p} - Hab ${numHab}`, numeroHabitacion: numHab, completada: false }); } } await addDoc(collection(db, 'obras'), { nombre: nuevaObra, tareas: tareasGeneradas, papelera: false }); setNuevaObra(''); setNumPlantas(1); setConfigHabitaciones('10'); refrescarObras(); mostrarToast("Proyecto creado con éxito."); };
+  const generarHotelInteligente = async () => { if(!nuevaObra) { mostrarToast("Introduce un nombre para el proyecto.", "error"); return; } const tareasGeneradas = generarTareasDeHotel(numPlantas, configHabitaciones); await addDoc(collection(db, 'obras'), { nombre: nuevaObra, tareas: tareasGeneradas, papelera: false }); setNuevaObra(''); setNumPlantas(1); setConfigHabitaciones('10'); refrescarObras(); mostrarToast("Proyecto creado con éxito."); };
   const marcarTareaHotel = async (tareaIdOArray) => { 
       if(!obraActiva) return; 
-      const idsAModificar = Array.isArray(tareaIdOArray) ? tareaIdOArray : [tareaIdOArray];
-      const tareasNuevas = obraActiva.tareas.map(t => idsAModificar.includes(t.id) ? { ...t, completada: !t.completada } : t ); 
+      const tareasNuevas = alternarTareas(obraActiva.tareas, tareaIdOArray); 
       await updateDoc(doc(db, 'obras', obraActiva.id), { tareas: tareasNuevas }); 
       setObraActiva({...obraActiva, tareas: tareasNuevas}); actualizarEnLista(setObrasList, obraActiva.id, { tareas: tareasNuevas }); 
   };  
@@ -428,24 +380,22 @@ export default function PanelOficina({ cambiarVista }) {
   const guardarEdicionMat = async () => { await updateDoc(doc(db, 'inventario', editandoMatId), { nombre: matEditado.nombre, stock: parseInt(matEditado.stock) }); actualizarEnLista(setMaterialesList, editandoMatId, { nombre: matEditado.nombre, stock: parseInt(matEditado.stock) }); setEditandoMatId(null); mostrarToast("Material guardado."); };
   const borrarMaterial = (id) => { pedirConfirmacion("Eliminar Material", "¿Quitar este material del inventario?", async () => { await deleteDoc(doc(db, 'inventario', id)); quitarDeLista(setMaterialesList, id); mostrarToast("Material eliminado."); }); };
 
-  const getTimeRango = () => { const start = new Date(fechaInicio).getTime(); const end = new Date(fechaFin).getTime() + 86399999; return { start, end }; };
-  const partesHistorialFiltradosFecha = partesHistorial.filter(parte => { const { start, end } = getTimeRango(); return parte.timestamp >= start && parte.timestamp <= end; });
+  const getTimeRango = () => rangoDeFechas(fechaInicio, fechaFin);
+  const { start: rangoInicio, end: rangoFin } = getTimeRango();
+  const partesHistorialFiltradosFecha = filtrarPorRango(partesHistorial, rangoInicio, rangoFin);
 
-  const partesDeHoy = partesHistorial.filter(p => esDelDia(p.timestamp));
-  const totalHorasHoy = partesDeHoy.reduce((total, p) => total + horasTotalesDocumento(p), 0);
-  const trabajadoresHoy = new Set(partesDeHoy.map(p => p.creador)).size;
-  let totalTareas = 0, tareasCompletadas = 0; obrasActivas.forEach(obra => { totalTareas += (obra.tareas?.length || 0); tareasCompletadas += (obra.tareas?.filter(t => t.completada).length || 0); });
-  const porcentajeGlobal = totalTareas === 0 ? 0 : Math.round((tareasCompletadas / totalTareas) * 100);
+  const { partes: partesDeHoy, horas: totalHorasHoy, trabajadores: trabajadoresHoy } = resumenDelDia(partesHistorial);
+  const { porcentaje: porcentajeGlobal } = progresoDeObras(obrasActivas);
 
-  const partesCoincidentes = partesHistorialFiltradosFecha.filter(parte => { const texto = filtroBuscador.toLowerCase(); const nombrePersona = parte.nombreTrabajador || parte.creador || ''; return (parte.obra?.toLowerCase().includes(texto) || nombrePersona.toLowerCase().includes(texto) || parte.trabajo?.toLowerCase().includes(texto)); }).sort((a, b) => { if (ordenPartes === 'antiguos') return a.timestamp - b.timestamp; return b.timestamp - a.timestamp; });
+  const partesCoincidentes = buscarPartes(partesHistorialFiltradosFecha, filtroBuscador, ordenPartes);
   const partesAMostrar = partesCoincidentes.slice(0, limitePartes);
-  const materialesCoincidentes = materialesList.filter(m => m.nombre.toLowerCase().includes(filtroMateriales.toLowerCase())).sort((a, b) => { if (ordenMateriales === 'menor') return a.stock - b.stock; if (ordenMateriales === 'mayor') return b.stock - a.stock; return a.nombre.localeCompare(b.nombre); });
+  const materialesCoincidentes = filtrarMateriales(materialesList, filtroMateriales, ordenMateriales);
 
   // El cálculo de horas extra del periodo vive ahora en ControlNominas: solo esa
   // pantalla lo necesita y solo se monta cuando su pestaña está activa, así que la
   // carga inicial del panel no paga por él.
 
-  const obtenerEstadisticasHotel = (nombreHotel, obraId = null) => { const partesDelHotel = partesHistorial.filter(p => (obraId && p.obraId) ? p.obraId === obraId : p.obra === nombreHotel); let horasTotal = 0; const materialesMap = {}; partesDelHotel.forEach(p => { horasTotal += horasTotalesDocumento(p); if (p.materialesUsados && p.materialesUsados.length > 0) { p.materialesUsados.forEach(m => { materialesMap[m.nombre] = (materialesMap[m.nombre] || 0) + (Number(m.cantidad) || 0); }); } }); return { horas: horasTotal, materiales: Object.entries(materialesMap) }; };
+  const obtenerEstadisticasHotel = (nombreHotel, obraId = null) => estadisticasDeObra(partesHistorial, nombreHotel, obraId);
 
   const exportarPartesExcel = () => {
       const cabeceras = ['Fecha', 'Operarios (H. Extra)', 'Horas Extra', 'Hotel/Obra', 'Material Utilizado', 'Trabajo Realizado'];
@@ -522,35 +472,13 @@ export default function PanelOficina({ cambiarVista }) {
           for (const idItem of itemsAFacturar) { const refItem = doc(db, nombreColeccion, idItem); await updateDoc(refItem, { facturado: true }); }
           docPdf.save(`Factura_${referenciaFac}.pdf`);
           if (typeof setFacturasList === 'function') { setFacturasList(prev => [{ id: docRef.id, ...nuevaFacturaData }, ...prev]); }
-          if (modoFacturacion === 'certificaciones') { if (typeof setCertificacionesList === 'function') { setCertificacionesList(prev => prev.map(c => itemsAFacturar.includes(c.id) ? { ...c, facturado: true } : c)); } } else { if (typeof setPartesHistorial === 'function') { setPartesHistorial(prev => prev.map(p => itemsAFacturar.includes(p.id) ? { ...p, facturado: true } : p)); } }
+          if (modoFacturacion === 'certificaciones') { setCertificacionesList(prev => marcarFacturados(prev, itemsAFacturar)); } else { setPartes(prev => marcarFacturados(prev, itemsAFacturar)); }
           alert("¡Factura emitida y elementos bloqueados con éxito!"); setItemsAFacturar([]); setFacturaCliente(''); setFacTarifaHora(''); setFacImporteMateriales('');
       } catch (error) { console.error("Error al emitir factura:", error); alert("Error al emitir la factura: " + error.message); }
   };
 
   const borrarFactura = (factura) => { pedirConfirmacion("Anular Factura", "Al borrar esta factura, los documentos que agrupaba volverán a estar pendientes. ¿Estás seguro?", async () => { try { const batch = writeBatch(db); const refFactura = doc(db, 'facturas', factura.id); batch.delete(refFactura); const arrayDeIds = factura.items || []; const nombreColeccion = factura.modo === 'albaranes' ? 'partes_de_trabajo' : 'certificaciones'; for (let id of arrayDeIds) { const refItem = doc(db, nombreColeccion, id); batch.update(refItem, { facturado: false }); } await batch.commit(); cargarDatos(); mostrarToast("Factura anulada correctamente."); } catch (error) { console.error("Error al anular factura:", error); mostrarToast("Hubo un error al anular la factura.", "error"); } }); };  
-  const agregarItemPresupuesto = () => { if(!presuSelectMat || !presuCantMat || !presuPrecioMat) { mostrarToast("Completa los datos del concepto.", "error"); return; } setPresuItems([...presuItems, { id: Date.now(), nombre: presuSelectMat, cantidad: parseFloat(presuCantMat), precioUnitario: parseFloat(presuPrecioMat), total: parseFloat(presuCantMat) * parseFloat(presuPrecioMat) }]); setPresuSelectMat(''); setPresuCantMat(1); setPresuPrecioMat(''); };
-  const quitarItemPresupuesto = (id) => { setPresuItems(presuItems.filter(item => item.id !== id)); };
-  
-  const generarPDFPresupuesto = (datos) => {
-      const { cliente, items, horasEstimadas, precioHora, fecha, id } = datos;
-      try {
-          const doc = new jsPDF(); doc.setTextColor(0, 0, 0); doc.setFontSize(24); doc.setFont("helvetica", "bold"); doc.text("PRESUPUESTO", 14, 25);
-          const numPresupuesto = id ? `PR-${id.toString().slice(-6).toUpperCase()}` : `PR-${Date.now().toString().slice(-6).toUpperCase()}`;
-          doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text(`Referencia: ${numPresupuesto}`, 14, 33); doc.text(`Fecha de Emisión: ${fecha || new Date().toLocaleDateString()}`, 14, 38); doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.text("GestiónPro Software & Maintenance", 196, 25, { align: 'right' }); doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("Soporte Técnico y Reformas", 196, 31, { align: 'right' }); doc.text("contacto@gestionpro.com", 196, 37, { align: 'right' }); doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.8); doc.line(14, 45, 196, 45); doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text("DATOS DEL CLIENTE:", 14, 55); doc.setFontSize(12); doc.setFont("helvetica", "normal"); doc.text(cliente, 14, 62);
-          let datosTabla = (items || []).map(item => [ item.nombre, item.cantidad.toString(), `${parseFloat(item.precioUnitario).toFixed(2)} €`, `${parseFloat(item.total).toFixed(2)} €` ]);
-          if (horasEstimadas && precioHora && parseFloat(horasEstimadas) > 0) { const totalHoras = parseFloat(horasEstimadas) * parseFloat(precioHora); datosTabla.push([ "Mano de Obra (Horas estimadas de trabajo)", horasEstimadas.toString(), `${parseFloat(precioHora).toFixed(2)} €`, `${totalHoras.toFixed(2)} €` ]); }
-          autoTable(doc, { startY: 75, head: [['Concepto / Material', 'Cant.', 'Precio Unit.', 'Total']], body: datosTabla, theme: 'grid', headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold', halign: 'left' }, columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' } }, styles: { fontSize: 10, cellPadding: 6, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.1 }, alternateRowStyles: { fillColor: [245, 245, 245] } });
-          const sumItems = (items || []).reduce((acc, item) => acc + parseFloat(item.total), 0); const sumHoras = (parseFloat(horasEstimadas) || 0) * (parseFloat(precioHora) || 0); const calcSubtotal = sumItems + sumHoras; const calcIva = calcSubtotal * 0.21; const calcTotal = calcSubtotal + calcIva;
-          const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 120) + 15; const boxX = 130; doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("Base Imponible:", boxX, finalY); doc.text(`${calcSubtotal.toFixed(2)} €`, 196, finalY, { align: 'right' }); doc.text("IVA (21%):", boxX, finalY + 8); doc.text(`${calcIva.toFixed(2)} €`, 196, finalY + 8, { align: 'right' }); doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.5); doc.line(boxX, finalY + 12, 196, finalY + 12); doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text("TOTAL PRESUPUESTO:", boxX - 15, finalY + 20); doc.text(`${calcTotal.toFixed(2)} €`, 196, finalY + 20, { align: 'right' });
-          doc.setFontSize(8); doc.setFont("helvetica", "italic"); doc.setTextColor(80, 80, 80); doc.text("• Este presupuesto tiene una validez de 30 días naturales desde su fecha de emisión.", 14, 270);
-          doc.save(`Presupuesto_${cliente.replace(/[^a-zA-Z0-9]/g, '_')}_${numPresupuesto}.pdf`);
-      } catch (error) { console.error(error); mostrarToast("Fallo técnico al emitir PDF", "error"); }
-  };
 
-  const guardarYValidarPresupuesto = async () => { if(!presuCliente || presuCliente.trim() === '') { mostrarToast("Escribe el nombre del Cliente.", "error"); return; } const subtotal = presuItems.reduce((acc, item) => acc + item.total, 0) + ((parseFloat(presuHoras) || 0) * (parseFloat(presuPrecioHora) || 0)); const iva = subtotal * 0.21; const totalFinal = subtotal + iva; const nuevoPresu = { cliente: presuCliente, items: presuItems, horasEstimadas: parseFloat(presuHoras) || 0, precioHora: parseFloat(presuPrecioHora) || 0, total: totalFinal, estado: 'validado', fecha: new Date().toLocaleDateString(), timestamp: Date.now() }; const docRef = await addDoc(collection(db, 'presupuestos'), nuevoPresu); refrescarPresupuestos(); generarPDFPresupuesto({ ...nuevoPresu, id: docRef.id }); setPresuCliente(''); setPresuItems([]); setPresuHoras(''); setPresuPrecioHora(''); mostrarToast("Presupuesto guardado en el historial."); };
-  const cambiarEstadoPresupuesto = async (id, estadoActual) => { const nuevoEstado = estadoActual === 'validado' ? 'pendiente' : 'validado'; await updateDoc(doc(db, 'presupuestos', id), { estado: nuevoEstado }); actualizarEnLista(setPresupuestosList, id, { estado: nuevoEstado }); };
-  const borrarPresupuesto = (id) => { pedirConfirmacion("Eliminar Presupuesto", "¿Estás seguro de querer borrar esta oferta del sistema?", async () => { await deleteDoc(doc(db, 'presupuestos', id)); quitarDeLista(setPresupuestosList, id); mostrarToast("Presupuesto eliminado."); }); };
-  const descargarPresupuestoExistente = (presupuesto) => { generarPDFPresupuesto(presupuesto); };
 
   const restaurarElemento = async (id, coleccion) => {
       // Restaurar un parte rechazado deshace el rechazo: vuelve a la bandeja.
@@ -656,7 +584,7 @@ export default function PanelOficina({ cambiarVista }) {
           {categoriaActiva === 'sistema' && ( <><button onClick={()=>setPestañaActiva('papelera')} style={subMenuBtnStyle(pestañaActiva === 'papelera')}>Papelera de Reciclaje</button></> )}
       </div>
 
-      {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarOperario} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} /> )}
+      {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} /> )}
       {pestañaActiva === 'resumen' && ( <ResumenMetricas partesDeHoy={partesDeHoy} totalHorasHoy={totalHorasHoy} trabajadoresHoy={trabajadoresHoy} porcentajeGlobal={porcentajeGlobal} /> )}
       {pestañaActiva === 'obras' && ( <GestionProyectos blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevaObra={nuevaObra} setNuevaObra={setNuevaObra} numPlantas={numPlantas} setNumPlantas={setNumPlantas} configHabitaciones={configHabitaciones} setConfigHabitaciones={setConfigHabitaciones} generarHotelInteligente={generarHotelInteligente} obrasList={obrasActivas} obraActiva={obraActiva} setObraActiva={setObraActiva} borrarObra={borrarObra} obtenerEstadisticasHotel={obtenerEstadisticasHotel} marcarTareaHotel={marcarTareaHotel} /> )}
       {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarRolTrabajador={cambiarRolTrabajador} cambiandoRolId={cambiandoRolId} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} /> )}
@@ -677,7 +605,7 @@ export default function PanelOficina({ cambiarVista }) {
       )}
       {pestañaActiva === 'certificaciones' && ( <GeneradorCertificaciones blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} certObraSeleccionada={certObraSeleccionada} setCertObraSeleccionada={setCertObraSeleccionada} setCertPartesSeleccionados={setCertPartesSeleccionados} obrasList={obrasActivas} partesPendientesCertificar={partesPendientesCertificar} toggleParteCertificacion={toggleParteCertificacion} certPartesSeleccionados={certPartesSeleccionados} certificacionesList={certificacionesActivas} borrarCertificacion={borrarCertificacion} /> )}
       {pestañaActiva === 'facturacion' && ( <EmisionFacturas blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} modoFacturacion={modoFacturacion} setModoFacturacion={setModoFacturacion} setItemsAFacturar={setItemsAFacturar} facturaCliente={facturaCliente} setFacturaCliente={setFacturaCliente} facTarifaHora={facTarifaHora} setFacTarifaHora={setFacTarifaHora} facImporteMateriales={facImporteMateriales} setFacImporteMateriales={setFacImporteMateriales} partesHistorial={partesHistorial} certificacionesList={certificacionesActivas} itemsAFacturar={itemsAFacturar} toggleItemFacturacion={toggleItemFacturacion} generarPDFFactura={generarPDFFactura} facturasList={facturasList} borrarFactura={borrarFactura} /> )}
-      {pestañaActiva === 'presupuestos' && ( <PresupuestosOfertas inventario={materialesList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} guardarYValidarPresupuesto={guardarYValidarPresupuesto} presuCliente={presuCliente} setPresuCliente={setPresuCliente} presuSelectMat={presuSelectMat} setPresuSelectMat={setPresuSelectMat} presuCantMat={presuCantMat} setPresuCantMat={setPresuCantMat} presuPrecioMat={presuPrecioMat} setPresuPrecioMat={setPresuPrecioMat} agregarItemPresupuesto={agregarItemPresupuesto} presuItems={presuItems} quitarItemPresupuesto={quitarItemPresupuesto} presuHoras={presuHoras} setPresuHoras={setPresuHoras} presuPrecioHora={presuPrecioHora} setPresuPrecioHora={setPresuPrecioHora} presupuestosList={presupuestosList} descargarPresupuestoExistente={descargarPresupuestoExistente} cambiarEstadoPresupuesto={cambiarEstadoPresupuesto} borrarPresupuesto={borrarPresupuesto} /> )}
+      {pestañaActiva === 'presupuestos' && ( <PresupuestosOfertas inventario={materialesList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} /> )}
       {pestañaActiva === 'papelera' && ( <PapeleraReciclaje blockStyle={blockStyle} partesPapelera={partesPapelera} certificacionesPapelera={certificacionesPapelera} trabajadoresPapelera={trabajadoresPapelera} obrasPapelera={obrasPapelera} restaurarElemento={restaurarElemento} destruirElementoFisico={destruirElementoFisico} /> )}
 
     </div>

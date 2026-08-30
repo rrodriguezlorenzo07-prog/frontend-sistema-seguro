@@ -1,3 +1,4 @@
+// @ts-check
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
 import { collection, getDocs, query, where, doc, setDoc } from 'firebase/firestore';
@@ -22,7 +23,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   // ESTADOS DE MATERIALES
   const [materialesUsados, setMaterialesUsados] = useState([]);
   const [matSelectId, setMatSelectId] = useState('');
-  const [matSelectCant, setMatSelectCant] = useState(1);
+  const [matSelectCant, setMatSelectCant] = useState('1');
   const [matSelectPrecio, setMatSelectPrecio] = useState('');
 
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
@@ -75,16 +76,16 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
   // === LÓGICA DE MATERIALES ===
   const agregarMaterialLista = () => {
-      if(!matSelectId || matSelectCant < 1) return;
+      if(!matSelectId || Number(matSelectCant) < 1) return;
       const matInfo = inventario.find(m => m.id === matSelectId);
       if(matInfo) {
           setMaterialesUsados([...materialesUsados, { 
               id: matInfo.id, 
               nombre: matInfo.nombre, 
               cantidad: parseInt(matSelectCant),
-              precio: parseFloat(matSelectPrecio || 0)
+              precio: parseFloat(matSelectPrecio || '0')
           }]);
-          setMatSelectId(''); setMatSelectCant(1); setMatSelectPrecio('');
+          setMatSelectId(''); setMatSelectCant('1'); setMatSelectPrecio('');
       }
   };
 
@@ -328,7 +329,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
           <div>
             <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Notas Extras / Observaciones Generales</label>
-            <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows="2" placeholder="Información adicional que no encaje en las tareas..." style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', backgroundColor: '#fafafa', boxSizing: 'border-box' }} />
+            <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows={2} placeholder="Información adicional que no encaje en las tareas..." style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', backgroundColor: '#fafafa', boxSizing: 'border-box' }} />
           </div>
 
           <div style={{ padding: '20px', border: '1px solid #1a1a1a' }}>

@@ -1,3 +1,4 @@
+// @ts-check
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Trash2, Package, FileText, Clock, MapPin, Plus, Minus } from 'lucide-react';
 import { resolverFirmasDe } from '../../utils/firmas';

@@ -1,3 +1,4 @@
+// @ts-check
 import { useState, useEffect, useCallback } from 'react';
 import { FileSpreadsheet, Euro, User, CalendarOff, RotateCcw, PencilLine, Lock, Archive, AlertTriangle } from 'lucide-react';
 import { db, auth } from '../../firebase';
