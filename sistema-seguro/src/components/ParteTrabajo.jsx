@@ -126,7 +126,14 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
             const nombreArchivo = `firmas/firma_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png`;
             const firmaStorageRef = ref(storage, nombreArchivo);
             
-            await uploadString(firmaStorageRef, base64Firma, 'data_url');
+            // El metadato `creador` es lo que permite a storage.rules saber de quién
+            // es cada firma: el nombre del archivo no lo dice y las reglas no pueden
+            // consultar Firestore por él. Se guarda en minúsculas para que la
+            // comparación de la regla no dependa de cómo escriba el correo el usuario.
+            await uploadString(firmaStorageRef, base64Firma, 'data_url', {
+                contentType: 'image/png',
+                customMetadata: { creador: usuario.email.toLowerCase().trim() }
+            });
             // Se guarda la RUTA, no la URL de descarga: esa URL lleva un token
             // permanente y acabaría circulando en cada lectura del parte. Además
             // esto ahorra una llamada de red en el peor momento posible, con el
