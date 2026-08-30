@@ -123,13 +123,19 @@ await comprobar('sin autenticar no se sube nada', () =>
 );
 
 console.log('\n─── CASO 6: una firma no se reemplaza ni se borra, y no hay otras rutas ───');
-// HALLAZGO ABIERTO, no una regla querida: `allow update, delete: if false` NO impide
-// reemplazar una firma. Una subida sobre una ruta ya ocupada se evalúa como `create`,
-// así que ese `if false` nunca se mira. Se deja aquí como assertSucceeds para que
-// conste la realidad; el día que se añada `resource == null` al create, esta
-// comprobación debe pasar a assertFails y este comentario desaparecer.
-await comprobar('PENDIENTE: hoy SÍ se puede sobrescribir una firma existente', () =>
-    assertSucceeds(uploadBytes(ref(admin.storage(), 'firmas/de-juan.png'), PNG, { contentType: 'image/png' }))
+// Lo que cierra el reemplazo es `resource == null` en el create, no el `update: if
+// false`: una subida sobre una ruta ocupada se evalúa como create y nunca llega a mirar
+// el update. Estos tres casos son justamente esa distinción.
+await comprobar('el creador NO puede sustituir su propia firma', () =>
+    assertFails(uploadBytes(ref(juan.storage(), 'firmas/de-juan.png'), PNG, { contentType: 'image/png' }))
+);
+await comprobar('ni el admin puede sustituir una firma', () =>
+    assertFails(uploadBytes(ref(admin.storage(), 'firmas/de-juan.png'), PNG, { contentType: 'image/png' }))
+);
+await comprobar('tampoco cambiándole los metadatos', () =>
+    assertFails(uploadBytes(ref(juan.storage(), 'firmas/de-juan.png'), PNG, {
+        contentType: 'image/png', customMetadata: { creador: EMAIL_JUAN }
+    }))
 );
 await comprobar('otras rutas fuera de firmas/ siguen cerradas', () =>
     assertFails(uploadBytes(ref(juan.storage(), 'otros/cosa.png'), PNG, { contentType: 'image/png' }))
