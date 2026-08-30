@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, FileText, Euro } from 'lucide-react';
+import { color } from '../../estilos/tokens';
 
 export default function PresupuestosOfertas({ blockStyle, btnBlackStyle, labelStyle, inputStyle, inventario = [] }) {
   // Estado del presupuesto actual
@@ -53,7 +54,7 @@ export default function PresupuestosOfertas({ blockStyle, btnBlackStyle, labelSt
       </div>
 
       {/* DATOS DEL CLIENTE */}
-      <div style={{ marginBottom: '25px', padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#fafafa', display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+      <div style={{ marginBottom: '25px', padding: '20px', border: `1px solid ${color.linea}`, backgroundColor: color.fondo, display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '250px' }}>
           <label style={labelStyle}>Cliente / Obra:</label>
           <input type="text" placeholder="Nombre del cliente o proyecto..." value={cliente} onChange={(e) => setCliente(e.target.value)} style={inputStyle} />
@@ -69,14 +70,14 @@ export default function PresupuestosOfertas({ blockStyle, btnBlackStyle, labelSt
         <div style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '10px' }}>Partidas y Materiales</div>
         
         {lineasPresupuesto.map((linea, index) => (
-          <div key={index} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '12px', border: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
+          <div key={index} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '12px', border: `1px solid ${color.linea}`, backgroundColor: color.superficie }}>
             
             {/* SELECTOR DE MATERIAL DEL ALMACÉN (O escribir libre) */}
             <div style={{ flex: 2, minWidth: '200px' }}>
-              <label style={{ fontSize: '9px', color: '#64748b', display: 'block', marginBottom: '3px' }}>SELECCIONAR DEL ALMACÉN / DESCRIPCIÓN</label>
+              <label style={{ fontSize: '9px', color: color.textoSuave, display: 'block', marginBottom: '3px' }}>SELECCIONAR DEL ALMACÉN / DESCRIPCIÓN</label>
               <select 
                 onChange={(e) => seleccionarMaterialInventario(index, e.target.value)}
-                style={{ ...inputStyle, marginBottom: '5px', backgroundColor: '#f8fafc' }}
+                style={{ ...inputStyle, marginBottom: '5px', backgroundColor: color.superficieTenida }}
                 defaultValue=""
               >
                 <option value="" disabled>-- Elige del inventario o escribe abajo --</option>
@@ -95,13 +96,13 @@ export default function PresupuestosOfertas({ blockStyle, btnBlackStyle, labelSt
 
             {/* CANTIDAD */}
             <div style={{ width: '90px' }}>
-              <label style={{ fontSize: '9px', color: '#64748b', display: 'block', marginBottom: '3px' }}>CANTIDAD</label>
+              <label style={{ fontSize: '9px', color: color.textoSuave, display: 'block', marginBottom: '3px' }}>CANTIDAD</label>
               <input type="number" min="1" value={linea.cantidad} onChange={(e) => actualizarLinea(index, 'cantidad', e.target.value)} style={inputStyle} />
             </div>
 
             {/* PRECIO UNITARIO */}
             <div style={{ width: '110px' }}>
-              <label style={{ fontSize: '9px', color: '#64748b', display: 'block', marginBottom: '3px' }}>PRECIO (€)</label>
+              <label style={{ fontSize: '9px', color: color.textoSuave, display: 'block', marginBottom: '3px' }}>PRECIO (€)</label>
               <input type="number" step="0.01" value={linea.precioUnitario} onChange={(e) => actualizarLinea(index, 'precioUnitario', e.target.value)} style={inputStyle} />
             </div>
 
@@ -111,22 +112,22 @@ export default function PresupuestosOfertas({ blockStyle, btnBlackStyle, labelSt
             </div>
 
             {/* BOTÓN BORRAR LÍNEA */}
-            <button onClick={() => eliminarLinea(index)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '5px' }}>
+            <button onClick={() => eliminarLinea(index)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: color.error, padding: '5px' }}>
               <Trash2 size={18} />
             </button>
           </div>
         ))}
 
-        <button onClick={agregarLinea} style={{ ...btnBlackStyle, backgroundColor: '#ffffff', color: '#1a1a1a', border: '1px solid #1a1a1a', marginTop: '5px', cursor: 'pointer' }}>
+        <button onClick={agregarLinea} style={{ ...btnBlackStyle, backgroundColor: color.superficie, color: color.texto, border: `1px solid ${color.petroleo}`, marginTop: '5px', cursor: 'pointer' }}>
           <Plus size={16} /> Añadir Línea Libre
         </button>
       </div>
 
       {/* RESUMEN TOTAL */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px', padding: '15px', backgroundColor: '#1a1a1a', color: '#fff', marginTop: '20px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px', padding: '15px', backgroundColor: color.petroleo, color: color.textoSobreOscuro, marginTop: '20px' }}>
         <div style={{ fontSize: '12px' }}>Subtotal: <strong>{subtotal.toFixed(2)} €</strong></div>
         <div style={{ fontSize: '12px' }}>IVA ({ivaPorcentaje}%): <strong>{totalIva.toFixed(2)} €</strong></div>
-        <div style={{ fontSize: '18px', fontWeight: 'bold', borderTop: '1px solid #444', paddingTop: '5px', marginTop: '5px' }}>
+        <div style={{ fontSize: '18px', fontWeight: 'bold', borderTop: `1px solid ${color.textoSuave}`, paddingTop: '5px', marginTop: '5px' }}>
           TOTAL PRESUPUESTO: {totalPresupuesto.toFixed(2)} €
         </div>
       </div>

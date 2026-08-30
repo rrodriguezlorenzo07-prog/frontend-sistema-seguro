@@ -6,6 +6,9 @@ import { ref, uploadString } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
+import { color, texto, peso, interletra, espacio, radio, objetivo } from '../estilos/tokens';
+import Boton from '../ui/Boton';
+import Insignia from '../ui/Insignia';
 
 export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const [obrasList, setObrasList] = useState([]);
@@ -68,10 +71,12 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
 
   // Un parte rechazado sigue siendo visible para su autor: sin este caso se le
   // mostraba como "Aprobado", que es justo lo contrario de lo que ocurrió.
+  // Devuelve el TONO de la insignia, no un color suelto: el color de un estado lo
+  // decide el sistema de diseño, no cada pantalla.
   const insigniaEstado = (estado) => {
-      if (estado === 'aprobado') return { color: '#1a1a1a', texto: 'Aprobado' };
-      if (estado === 'rechazado') return { color: '#ef4444', texto: 'Rechazado' };
-      return { color: '#64748b', texto: 'Pendiente' };
+      if (estado === 'aprobado') return { tono: 'exito', texto: 'Aprobado' };
+      if (estado === 'rechazado') return { tono: 'error', texto: 'Rechazado' };
+      return { tono: 'info', texto: 'Pendiente' };
   };
 
   // === LÓGICA DE MATERIALES ===
@@ -225,63 +230,63 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   };
 
   const btnStyle = (activo) => ({
-      flex: 1, padding: '14px', backgroundColor: activo ? '#1a1a1a' : 'transparent', color: activo ? '#ffffff' : '#64748b',
-      border: activo ? '1px solid #1a1a1a' : '1px solid #e5e7eb', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+      flex: 1, padding: espacio.md, minHeight: objetivo.amplio, borderRadius: radio.sutil, backgroundColor: activo ? color.petroleo : color.superficie, color: activo ? color.textoSobreOscuro : color.textoSuave,
+      border: `1px solid ${activo ? color.petroleo : color.linea}`, fontSize: texto.menor, fontWeight: peso.fuerte, letterSpacing: interletra.etiqueta, textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: espacio.xs
   });
 
   return (
-    <div style={{ maxWidth: '600px', margin: '40px auto', padding: '0 20px', fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
+    <div style={{ maxWidth: '620px', margin: '0 auto', padding: espacio.md }}>
       
       {/* NAVEGACIÓN SUPERIOR */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #e5e7eb', paddingBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: espacio.lg, borderBottom: `1px solid ${color.linea}`, paddingBottom: espacio.md, flexWrap: 'wrap', gap: espacio.sm }}>
         <div style={{ display: 'flex', gap: '10px', flex: 1, minWidth: '200px' }}>
             <button onClick={() => setVistaMisPartes(false)} style={btnStyle(!vistaMisPartes)}><FileText size={16} /> Parte</button>
             <button onClick={() => setVistaMisPartes(true)} style={btnStyle(vistaMisPartes)}><FolderOpen size={16} /> Historial</button>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
             {esAdmin && (
-                <button onClick={volverOficina} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 15px', backgroundColor: '#ffffff', color: '#1a1a1a', border: '1px solid #1a1a1a', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 'bold' }}>
+                <Boton variante="secundario" onClick={volverOficina}>
                     <Building2 size={14} /> Oficina
-                </button>
+                </Boton>
             )}
-            <button onClick={cerrarSesion} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 15px', backgroundColor: 'transparent', color: '#1a1a1a', border: '1px solid #e5e7eb', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 'bold' }}>
+            <Boton variante="fantasma" onClick={cerrarSesion}>
                 <LogOut size={14} /> Salir
-            </button>
+            </Boton>
         </div>
       </div>
 
       {!vistaMisPartes ? (
         <form onSubmit={enviarParte} style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
           
-          <div style={{ padding: '15px', border: '1px solid #e5e7eb', fontSize: '12px', color: '#1a1a1a', letterSpacing: '1px', textTransform: 'uppercase', textAlign: 'center' }}>
+          <div style={{ padding: '15px', border: `1px solid ${color.linea}`, fontSize: '12px', color: color.texto, letterSpacing: '1px', textTransform: 'uppercase', textAlign: 'center' }}>
               Operario activo: <strong>{nombreOficial}</strong>
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Lugar de Trabajo / Hotel</label>
+            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Lugar de Trabajo / Hotel</label>
             <select onChange={(e) => {
                 const val = e.target.value;
                 if(val==='OTRA') { setEsOtraObra(true); setObraSeleccionada(null); }
                 else { setEsOtraObra(false); setObraSeleccionada(obrasList.find(o => o.id === val)); }
-            }} value={esOtraObra ? 'OTRA' : (obraSeleccionada?.id || '')} required style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', backgroundColor: '#fafafa', fontSize: '14px' }}>
+            }} value={esOtraObra ? 'OTRA' : (obraSeleccionada?.id || '')} required style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', backgroundColor: color.fondo, fontSize: '14px' }}>
               <option value="">-- Seleccionar Proyecto --</option>
               {obrasList.map((obra) => <option key={obra.id} value={obra.id}>{obra.nombre}</option>)}
               <option value="OTRA">+ Añadir nueva ubicación...</option>
             </select>
-            {esOtraObra && <input type="text" value={obraNombreManual} onChange={(e) => setObraNombreManual(e.target.value)} required placeholder="Nombre del cliente o proyecto..." style={{ width: '100%', padding: '15px', border: '1px solid #1a1a1a', marginTop: '10px', boxSizing: 'border-box' }} />}
+            {esOtraObra && <input type="text" value={obraNombreManual} onChange={(e) => setObraNombreManual(e.target.value)} required placeholder="Nombre del cliente o proyecto..." style={{ width: '100%', padding: '15px', border: `1px solid ${color.petroleo}`, marginTop: '10px', boxSizing: 'border-box' }} />}
           </div>
 
           {/* === SECCIÓN MEJORADA DE HABITACIONES Y TAREAS === */}
-          <div style={{ padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#fafafa' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
+          <div style={{ padding: '20px', border: `1px solid ${color.linea}`, backgroundColor: color.fondo }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
                   <MapPin size={16}/> Registro por Habitaciones
               </label>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
-                  <input type="text" placeholder="Ej: Habitación 101 o Pasillo 2" value={tareaUbicacion} onChange={(e) => setTareaUbicacion(e.target.value)} style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
-                  <input type="text" placeholder="Ej: Instalación de puerta de paso" value={tareaDescripcion} onChange={(e) => setTareaDescripcion(e.target.value)} style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
+                  <input type="text" placeholder="Ej: Habitación 101 o Pasillo 2" value={tareaUbicacion} onChange={(e) => setTareaUbicacion(e.target.value)} style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
+                  <input type="text" placeholder="Ej: Instalación de puerta de paso" value={tareaDescripcion} onChange={(e) => setTareaDescripcion(e.target.value)} style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
                   
-                  <button type="button" onClick={agregarTareaLista} style={{ padding: '15px', backgroundColor: '#1a1a1a', color: 'white', border: 'none', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '12px', marginTop: '5px' }}>
+                  <button type="button" onClick={agregarTareaLista} style={{ padding: '15px', backgroundColor: color.petroleo, color: color.textoSobreOscuro, border: 'none', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '12px', marginTop: '5px' }}>
                       <Plus size={16}/> Añadir Habitación / Trabajo
                   </button>
               </div>
@@ -289,12 +294,12 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
               {tareasRealizadas.length > 0 && (
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {tareasRealizadas.map((t, index) => (
-                          <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', border: '1px solid #1a1a1a', backgroundColor: '#ffffff' }}>
+                          <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', border: `1px solid ${color.petroleo}`, backgroundColor: color.superficie }}>
                               <div>
-                                  <strong style={{ display: 'block', marginBottom: '4px', color: '#1a1a1a', fontSize: '14px' }}>{t.ubicacion}</strong>
-                                  <span style={{ color: '#475569', fontSize: '13px' }}>{t.descripcion}</span>
+                                  <strong style={{ display: 'block', marginBottom: '4px', color: color.texto, fontSize: '14px' }}>{t.ubicacion}</strong>
+                                  <span style={{ color: color.textoSuave, fontSize: '13px' }}>{t.descripcion}</span>
                               </div>
-                              <button type="button" onClick={()=>quitarTareaLista(index)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '5px' }}><Trash2 size={18}/></button>
+                              <button type="button" onClick={()=>quitarTareaLista(index)} style={{ color: color.error, background: 'none', border: 'none', cursor: 'pointer', padding: '5px' }}><Trash2 size={18}/></button>
                           </li>
                       ))}
                   </ul>
@@ -302,25 +307,25 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
           </div>
 
           {/* === SECCIÓN DE MATERIALES (Intacta) === */}
-          <div style={{ padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#fafafa' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}><Package size={16}/> Material Extra Utilizado</label>
+          <div style={{ padding: '20px', border: `1px solid ${color.linea}`, backgroundColor: color.fondo }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}><Package size={16}/> Material Extra Utilizado</label>
               
               <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
-                  <select value={matSelectId} onChange={(e)=>setMatSelectId(e.target.value)} style={{ flex: 2, minWidth: '150px', padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }}>
+                  <select value={matSelectId} onChange={(e)=>setMatSelectId(e.target.value)} style={{ flex: 2, minWidth: '150px', padding: '12px', border: `1px solid ${color.linea}`, outline: 'none' }}>
                       <option value="">Buscar en inventario...</option>
                       {inventario.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
                   </select>
-                  <input type="number" placeholder="Cant." value={matSelectCant} onChange={(e)=>setMatSelectCant(e.target.value)} min="1" style={{ width: '70px', padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }} />
-                  <input type="number" placeholder="Precio €" step="0.01" value={matSelectPrecio} onChange={(e)=>setMatSelectPrecio(e.target.value)} style={{ width: '90px', padding: '12px', border: '1px solid #e5e7eb', outline: 'none' }} />
-                  <button type="button" onClick={agregarMaterialLista} style={{ padding: '0 20px', backgroundColor: '#1a1a1a', color: 'white', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}><Plus size={18}/></button>
+                  <input type="number" placeholder="Cant." value={matSelectCant} onChange={(e)=>setMatSelectCant(e.target.value)} min="1" style={{ width: '70px', padding: '12px', border: `1px solid ${color.linea}`, outline: 'none' }} />
+                  <input type="number" placeholder="Precio €" step="0.01" value={matSelectPrecio} onChange={(e)=>setMatSelectPrecio(e.target.value)} style={{ width: '90px', padding: '12px', border: `1px solid ${color.linea}`, outline: 'none' }} />
+                  <button type="button" onClick={agregarMaterialLista} style={{ padding: '0 20px', backgroundColor: color.petroleo, color: color.textoSobreOscuro, border: 'none', fontWeight: 'bold', cursor: 'pointer' }}><Plus size={18}/></button>
               </div>
 
               {materialesUsados.length > 0 && (
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {materialesUsados.map((m, index) => (
-                          <li key={index} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 15px', border: '1px solid #e5e7eb', backgroundColor: '#ffffff', fontSize: '13px' }}>
-                              <span><strong>{m.cantidad}x</strong> {m.nombre} <span style={{ color: '#64748b', marginLeft: '10px' }}>({m.precio.toFixed(2)}€/u &rarr; <strong>{(m.cantidad * m.precio).toFixed(2)}€</strong>)</span></span>
-                              <button type="button" onClick={()=>quitarMaterialLista(index)} style={{ color: '#1a1a1a', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={14}/></button>
+                          <li key={index} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 15px', border: `1px solid ${color.linea}`, backgroundColor: color.superficie, fontSize: '13px' }}>
+                              <span><strong>{m.cantidad}x</strong> {m.nombre} <span style={{ color: color.textoSuave, marginLeft: '10px' }}>({m.precio.toFixed(2)}€/u &rarr; <strong>{(m.cantidad * m.precio).toFixed(2)}€</strong>)</span></span>
+                              <button type="button" onClick={()=>quitarMaterialLista(index)} style={{ color: color.texto, background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={14}/></button>
                           </li>
                       ))}
                   </ul>
@@ -328,26 +333,30 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Notas Extras / Observaciones Generales</label>
-            <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows={2} placeholder="Información adicional que no encaje en las tareas..." style={{ width: '100%', padding: '15px', border: '1px solid #e5e7eb', outline: 'none', backgroundColor: '#fafafa', boxSizing: 'border-box' }} />
+            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Notas Extras / Observaciones Generales</label>
+            <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows={2} placeholder="Información adicional que no encaje en las tareas..." style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', backgroundColor: color.fondo, boxSizing: 'border-box' }} />
           </div>
 
-          <div style={{ padding: '20px', border: '1px solid #1a1a1a' }}>
-              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', fontWeight: 'bold', color: '#1a1a1a', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
+          <div style={{ padding: '20px', border: `1px solid ${color.petroleo}` }}>
+              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><PenTool size={16}/> Firma de Conformidad</span>
-                  <button type="button" onClick={(e) => { e.preventDefault(); firmaRef.current.clear(); }} style={{ fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer' }}>Borrar</button>
+                  <button type="button" onClick={(e) => { e.preventDefault(); firmaRef.current.clear(); }} style={{ fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', color: color.textoSuave, background: 'none', border: 'none', cursor: 'pointer' }}>Borrar</button>
               </label>
-              <div style={{ border: '1px solid #e5e7eb', backgroundColor: '#fafafa' }}>
-                  <SignatureCanvas ref={firmaRef} penColor="black" canvasProps={{width: 500, height: 150, style: { width: '100%', height: '150px' }}} />
+              <div style={{ border: `1px solid ${color.linea}`, backgroundColor: color.fondo }}>
+                  {/* Los atributos width/height son la resolución INTERNA del lienzo,
+                      no su tamaño en pantalla: de ahí sale el PNG de la firma. Tocarlos
+                      cambia lo que se captura, así que se quedan como estaban.
+                      touchAction evita que el dedo haga scroll mientras se firma. */}
+                  <SignatureCanvas ref={firmaRef} penColor={color.petroleo} canvasProps={{ width: 500, height: 150, style: { width: '100%', height: '150px', touchAction: 'none' } }} />
               </div>
           </div>
 
-          <button type="submit" style={{ width: '100%', padding: '20px', backgroundColor: '#1a1a1a', color: '#ffffff', border: 'none', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', transition: 'all 0.3s' }}>
+          <button type="submit" style={{ width: '100%', padding: '20px', backgroundColor: color.petroleo, color: color.textoSobreOscuro, border: 'none', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', transition: 'all 0.3s' }}>
               <Send size={18} /> Registrar Documento
           </button>
           
           {mensaje.texto && (
-              <div style={{ padding: '15px', border: `1px solid ${mensaje.tipo === 'error' ? '#1a1a1a' : '#1a1a1a'}`, backgroundColor: mensaje.tipo === 'error' ? '#ffffff' : '#1a1a1a', color: mensaje.tipo === 'error' ? '#1a1a1a' : '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontWeight: 'bold', letterSpacing: '1px', fontSize: '12px', textTransform: 'uppercase' }}>
+              <div style={{ padding: '15px', border: `1px solid ${mensaje.tipo === 'error' ? color.petroleo : color.petroleo}`, backgroundColor: mensaje.tipo === 'error' ? color.superficie : color.petroleo, color: mensaje.tipo === 'error' ? color.petroleo : color.superficie, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontWeight: 'bold', letterSpacing: '1px', fontSize: '12px', textTransform: 'uppercase' }}>
                   {mensaje.texto}
               </div>
           )}
@@ -355,14 +364,14 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {misPartes.map(p => (
-                <div key={p.id} style={{ padding: '20px', border: '1px solid #e5e7eb', backgroundColor: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div key={p.id} style={{ padding: '20px', border: `1px solid ${color.linea}`, backgroundColor: color.superficie, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                        <div style={{ fontWeight: 'bold', fontSize: '14px', letterSpacing: '1px', color: '#1a1a1a', textTransform: 'uppercase', marginBottom: '5px' }}>{p.obra}</div>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>{p.fecha}</div>
+                        <div style={{ fontWeight: 'bold', fontSize: '14px', letterSpacing: '1px', color: color.texto, textTransform: 'uppercase', marginBottom: '5px' }}>{p.obra}</div>
+                        <div style={{ fontSize: '12px', color: color.textoSuave }}>{p.fecha}</div>
                     </div>
-                    <span style={{ border: `1px solid ${insigniaEstado(p.estado).color}`, color: insigniaEstado(p.estado).color, padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                    <Insignia tono={insigniaEstado(p.estado).tono}>
                         {insigniaEstado(p.estado).texto}
-                    </span>
+                    </Insignia>
                 </div>
             ))}
         </div>

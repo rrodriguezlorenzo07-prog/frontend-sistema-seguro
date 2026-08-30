@@ -16,6 +16,9 @@ import { hidratarPartes, rangoDeFechas, filtrarPorRango, buscarPartes, resumenDe
 import { cuadrillaInicial, agregarOperario, ajustarHorasExtra, fijarHorasExtra, quitarOperario, normalizarCuadrilla } from '../logica/cuadrilla';
 import { ubicacionCoincideConTarea, generarTareasDeHotel, alternarTareas, progresoDeObras, estadisticasDeObra } from '../logica/obras';
 import { filtrarMateriales } from '../logica/inventario';
+import { color, texto, peso, interletra, espacio, radio, sombra, transicion, objetivo, corte } from '../estilos/tokens';
+import Boton from '../ui/Boton';
+import Modal from '../ui/Modal';
 import BandejaValidacion from './oficina/BandejaValidacion';
 import ResumenMetricas from './oficina/ResumenMetricas';
 import GestionProyectos from './oficina/GestionProyectos';
@@ -491,71 +494,77 @@ export default function PanelOficina({ cambiarVista }) {
   };
   const destruirElementoFisico = (id, coleccion) => { pedirConfirmacion("Destrucción Definitiva", "Esta acción es irreversible y los datos se perderán de la base de datos para siempre. ¿Continuar?", async () => { await deleteDoc(doc(db, coleccion, id)); if (coleccion === 'partes_de_trabajo') { await deleteDoc(doc(db, 'validaciones', id)); } cargarDatos(); mostrarToast("Elemento destruido permanentemente."); }); };
 
-  const catActivaStyle = (isActive) => ({ padding: '10px 15px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', letterSpacing: '1px', textTransform: 'uppercase', color: isActive ? '#1a1a1a' : '#94a3b8', borderBottom: isActive ? '2px solid #1a1a1a' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s', backgroundColor: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', outline: 'none', whiteSpace: 'nowrap' });
-  const subMenuBtnStyle = (isActive) => ({ padding: '8px 16px', border: '1px solid #1a1a1a', background: isActive ? '#1a1a1a' : 'transparent', color: isActive ? 'white' : '#1a1a1a', fontWeight: 'bold', fontSize: '10px', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '50px', whiteSpace: 'nowrap' });
-  const blockStyle = { backgroundColor: '#ffffff', padding: 'clamp(15px, 4vw, 30px)', border: '1px solid #e5e7eb', boxSizing: 'border-box', width: '100%' };
-  const inputStyle = { width: '100%', padding: '12px', border: '1px solid #e5e7eb', outline: 'none', fontSize: '13px', backgroundColor: '#fafafa', boxSizing: 'border-box' };
-  const labelStyle = { display: 'block', fontSize: '10px', fontWeight: 'bold', color: '#1a1a1a', marginBottom: '8px', letterSpacing: '1px', textTransform: 'uppercase' };
-  const btnBlackStyle = { padding: '12px 20px', backgroundColor: '#1a1a1a', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' };
+  // Estos seis objetos siguen viajando por props a los hijos: convertirlos a primitivas
+  // dentro de cada componente es trabajo de la pasada siguiente. Definidos ya con
+  // tokens, todas las pantallas que los reciben cambian de aspecto sin tocarlas.
+  const catActivaStyle = (isActive) => ({ padding: `${espacio.sm} ${espacio.md}`, cursor: 'pointer', fontWeight: peso.fuerte, fontSize: texto.base, color: isActive ? color.petroleo : color.textoTenue, borderBottom: `2px solid ${isActive ? color.vidrio : 'transparent'}`, display: 'flex', alignItems: 'center', gap: espacio.xs, transition: `color ${transicion.normal}, border-color ${transicion.normal}`, backgroundColor: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', outline: 'none', whiteSpace: 'nowrap' });
+  const subMenuBtnStyle = (isActive) => ({ padding: `${espacio.xs} ${espacio.md}`, border: `1px solid ${isActive ? color.petroleo : color.canto}`, background: isActive ? color.petroleo : 'transparent', color: isActive ? color.textoSobreOscuro : color.vidrio, fontWeight: peso.fuerte, fontSize: texto.menor, letterSpacing: interletra.etiqueta, textTransform: 'uppercase', cursor: 'pointer', borderRadius: radio.pastilla, whiteSpace: 'nowrap', transition: `background ${transicion.normal}, color ${transicion.normal}` });
+  // El aire de Vidrio, pero contenido en pantallas estrechas: en oficina 32 px, en un
+  // teléfono 16, porque si no la mitad de la tarjeta es margen.
+  const blockStyle = { backgroundColor: color.superficie, padding: 'clamp(16px, 3vw, 32px)', border: `1px solid ${color.linea}`, borderRadius: radio.sutil, boxSizing: 'border-box', width: '100%' };
+  const inputStyle = { width: '100%', padding: `${espacio.sm} ${espacio.md}`, border: `1px solid ${color.linea}`, borderRadius: radio.sutil, outline: 'none', fontSize: texto.base, color: color.texto, backgroundColor: color.superficie, boxSizing: 'border-box', minHeight: objetivo.comodo };
+  const labelStyle = { display: 'block', fontSize: texto.etiqueta, fontWeight: peso.fuerte, color: color.textoSuave, marginBottom: espacio.xs, letterSpacing: interletra.etiqueta, textTransform: 'uppercase' };
+  const btnBlackStyle = { padding: `${espacio.sm} ${espacio.lg}`, backgroundColor: color.petroleo, color: color.textoSobreOscuro, border: '1px solid transparent', borderRadius: radio.sutil, cursor: 'pointer', fontWeight: peso.fuerte, fontSize: texto.menor, letterSpacing: interletra.etiqueta, textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: espacio.xs, whiteSpace: 'nowrap', minHeight: objetivo.comodo, boxShadow: sombra.sutil };
 
   const navegar = (cat, tab) => { setCategoriaActiva(cat); setPestañaActiva(tab); setMenuMovilAbierto(false); };
 
   return (
-    <div style={{ width: '100%', fontFamily: "'Inter', 'Helvetica Neue', sans-serif", color: '#1a1a1a', boxSizing: 'border-box' }}>
+    <div style={{ width: '100%', color: color.texto, boxSizing: 'border-box' }}>
+      {/* Lo único que no cabe en un objeto de estilo: pseudoelementos, media queries y
+          keyframes. Los valores salen de los mismos tokens, interpolados. */}
       <style>{`
-        .desktop-menu { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; }
+        .desktop-menu { display: flex; gap: ${espacio.xs}; overflow-x: auto; padding-bottom: ${espacio.xxs}; }
         .desktop-menu::-webkit-scrollbar { height: 4px; }
-        .desktop-menu::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .mobile-toggle { display: none; background: none; border: none; cursor: pointer; color: #1a1a1a; padding: 5px; }
+        .desktop-menu::-webkit-scrollbar-thumb { background: ${color.canto}; border-radius: ${radio.sutil}; }
+        .mobile-toggle { display: none; background: none; border: none; cursor: pointer; color: ${color.petroleo}; padding: ${espacio.xxs}; }
         .mobile-dropdown { display: none; }
         .hide-on-mobile { display: inline-block; }
-        @media (max-width: 1024px) {
+        @media (max-width: ${corte.escritorio}) {
             .desktop-menu { display: none !important; }
             .mobile-toggle { display: block !important; }
             .hide-on-mobile { display: none !important; }
-            .mobile-dropdown.open { display: flex !important; flex-direction: column; gap: 5px; background: #fafafa; padding: 15px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 20px; }
+            .mobile-dropdown.open { display: flex !important; flex-direction: column; gap: ${espacio.xxs}; background: ${color.superficieTenida}; padding: ${espacio.md}; border: 1px solid ${color.canto}; border-radius: ${radio.medio}; margin-bottom: ${espacio.md}; }
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       `}</style>
 
       {cargando && (
-          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(2px)', zIndex: 99999, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-              <div style={{ width: '40px', height: '40px', border: '4px solid #e5e7eb', borderTop: '4px solid #1a1a1a', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-              <p style={{ marginTop: '15px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '2px', fontSize: '12px', color: '#1a1a1a' }}>Sincronizando datos...</p>
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(246, 248, 248, 0.88)', backdropFilter: 'blur(2px)', zIndex: 99999, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+              <div style={{ width: '40px', height: '40px', border: `3px solid ${color.linea}`, borderTop: `3px solid ${color.vidrio}`, borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+              <p style={{ marginTop: espacio.md, fontWeight: peso.fuerte, letterSpacing: interletra.etiqueta, textTransform: 'uppercase', fontSize: texto.menor, color: color.textoSuave }}>Sincronizando datos…</p>
           </div>
       )}
 
       {toast.visible && (
-          <div style={{ position: 'fixed', bottom: '30px', right: '30px', backgroundColor: toast.tipo === 'error' ? '#ef4444' : '#1a1a1a', color: '#fff', padding: '15px 25px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', zIndex: 9999, transition: 'all 0.3s ease-out' }}>
+          <div style={{ position: 'fixed', bottom: espacio.lg, right: espacio.lg, maxWidth: 'calc(100vw - 48px)', backgroundColor: toast.tipo === 'error' ? color.error : color.petroleo, color: color.textoSobreOscuro, padding: `${espacio.sm} ${espacio.lg}`, borderRadius: radio.medio, display: 'flex', alignItems: 'center', gap: espacio.xs, boxShadow: sombra.elevada, zIndex: 9999 }}>
               {toast.tipo === 'error' ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
-              <span style={{ fontSize: '13px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>{toast.mensaje}</span>
+              <span style={{ fontSize: texto.base, fontWeight: peso.medio, lineHeight: 1.4 }}>{toast.mensaje}</span>
           </div>
       )}
 
-      {modalConfirm.visible && (
-          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000 }}>
-              <div style={{ backgroundColor: '#fff', padding: '30px', border: '1px solid #1a1a1a', width: '90%', maxWidth: '400px', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
-                  <h3 style={{ margin: '0 0 15px 0', fontSize: '18px', fontWeight: '300', textTransform: 'uppercase', letterSpacing: '2px' }}>{modalConfirm.titulo}</h3>
-                  <p style={{ margin: '0 0 25px 0', fontSize: '13px', color: '#475569', lineHeight: '1.5' }}>{modalConfirm.mensaje}</p>
-                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                      <button onClick={cerrarModal} style={{ padding: '10px 15px', background: 'transparent', border: '1px solid #1a1a1a', color: '#1a1a1a', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'pointer' }}>Cancelar</button>
-                      <button onClick={() => { modalConfirm.onConfirm(); cerrarModal(); }} style={{ padding: '10px 15px', background: '#1a1a1a', border: 'none', color: '#fff', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'pointer' }}>Confirmar</button>
-                  </div>
-              </div>
-          </div>
-      )}
+      <Modal
+          abierto={modalConfirm.visible}
+          titulo={modalConfirm.titulo}
+          descripcion={modalConfirm.mensaje}
+          onCerrar={cerrarModal}
+          ancho="estrecho"
+          acciones={<>
+              <Boton variante="fantasma" onClick={cerrarModal}>Cancelar</Boton>
+              <Boton onClick={() => { modalConfirm.onConfirm(); cerrarModal(); }}>Confirmar</Boton>
+          </>}
+      />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
           <div style={{ fontWeight: 'bold', fontSize: '18px', letterSpacing: '1px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ background: '#1a1a1a', color: 'white', padding: '6px 12px', borderRadius: '4px' }}>ERP</div><span>Oficina</span>
+              <div style={{ background: color.petroleo, color: color.textoSobreOscuro, padding: '6px 12px', borderRadius: '4px' }}>ERP</div><span>Oficina</span>
           </div>
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-              <button className="hide-on-mobile" onClick={cambiarVista} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 15px', backgroundColor: '#f1f5f9', color: '#1a1a1a', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' }}><ArrowLeftRight size={14} /> Vista Operario</button>
+              <button className="hide-on-mobile" onClick={cambiarVista} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 15px', backgroundColor: color.superficieHundida, color: color.texto, border: `1px solid ${color.linea}`, borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' }}><ArrowLeftRight size={14} /> Vista Operario</button>
               <button className="mobile-toggle" onClick={() => setMenuMovilAbierto(!menuMovilAbierto)}>{menuMovilAbierto ? <X size={26} /> : <Menu size={26} />}</button>
           </div>
       </div>
 
-      <div className="desktop-menu" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', marginBottom: '25px' }}>
+      <div className="desktop-menu" style={{ borderBottom: `1px solid ${color.linea}`, paddingBottom: '10px', marginBottom: '25px' }}>
           <button onClick={() => navegar('validacion', 'bandeja')} style={catActivaStyle(categoriaActiva === 'validacion')}><Inbox size={16} /> Validación</button>
           <button onClick={() => navegar('proyectos', 'obras')} style={catActivaStyle(categoriaActiva === 'proyectos')}><Building2 size={16} /> Proyectos</button>
           <button onClick={() => navegar('documentos', 'partes')} style={catActivaStyle(categoriaActiva === 'documentos')}><FolderOpen size={16} /> Docs y Facturas</button>
@@ -573,8 +582,8 @@ export default function PanelOficina({ cambiarVista }) {
           <button onClick={() => navegar('personal', 'trabajadores')} style={catActivaStyle(categoriaActiva === 'personal')}><Users size={16} /> Personal</button>
           <button onClick={() => navegar('almacen', 'almacen')} style={catActivaStyle(categoriaActiva === 'almacen')}><Package size={16} /> Almacén</button>
           <button onClick={() => navegar('sistema', 'papelera')} style={catActivaStyle(categoriaActiva === 'sistema')}><Settings size={16} /> Sistema</button>
-          <div style={{ borderTop: '1px solid #e5e7eb', margin: '10px 0' }}></div>
-          <button onClick={cambiarVista} style={{...catActivaStyle(false), color: '#2563eb'}}><ArrowLeftRight size={16} /> Cambiar a Vista Operario</button>
+          <div style={{ borderTop: `1px solid ${color.linea}`, margin: '10px 0' }}></div>
+          <button onClick={cambiarVista} style={{...catActivaStyle(false), color: color.vidrio}}><ArrowLeftRight size={16} /> Cambiar a Vista Operario</button>
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '30px', paddingLeft: '10px', flexWrap: 'wrap' }}>

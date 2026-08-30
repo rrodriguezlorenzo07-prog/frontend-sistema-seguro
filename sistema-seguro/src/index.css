@@ -1,31 +1,42 @@
+/* Dirección «Vidrio». Los valores de aquí son los mismos que src/estilos/tokens.js;
+   este archivo solo cubre lo que no se puede hacer desde un objeto de estilo en línea:
+   cargar la familia tipográfica, pintar el fondo del documento y el estado de foco. */
+
+@import url('https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600;700&display=swap');
+
 body {
   margin: 0;
-  /* Una fuente más moderna y elegante */
-  font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  color: #1e293b; 
-  /* Un fondo con un degradado súper suave y premium */
-  background: #f8fafc;
-  background-image: radial-gradient(at 0% 0%, hsla(210, 100%, 95%, 1) 0, transparent 50%), 
-                    radial-gradient(at 100% 100%, hsla(204, 100%, 93%, 1) 0, transparent 50%);
+  font-family: 'Familjen Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #0C2A31;                 /* color.texto */
+  background-color: #F6F8F8;      /* color.fondo */
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Efectos Premium para las casillas */
-input, textarea, select {
-  color: #0f172a !important; 
+input, textarea, select, button {
   font-family: inherit;
-  transition: all 0.3s ease; /* Animación suave */
+  color: #0C2A31;
 }
 
-/* Cuando haces clic en una casilla, se ilumina el borde (estilo profesional) */
+/* El foco pasa del azul genérico al verde de vidrio. Los componentes de src/ui/ lo
+   fijan por su cuenta; esto cubre los controles que todavía no son primitivas. */
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15) !important;
-  background-color: #ffffff !important;
+  border-color: #2F7C87 !important;
+  box-shadow: 0 0 0 3px rgba(47, 124, 135, 0.22) !important;
+  background-color: #FFFFFF !important;
 }
+
+/* Foco visible para quien navega con teclado. Antes no había ninguno. */
+button:focus-visible, a:focus-visible {
+  outline: 2px solid #2F7C87;
+  outline-offset: 2px;
+}
+
+/* Las columnas de cifras se alinean solas. */
+.cifras { font-variant-numeric: tabular-nums; }
 
 * {
   box-sizing: border-box;

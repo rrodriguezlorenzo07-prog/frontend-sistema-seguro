@@ -7,6 +7,11 @@ import { Menu, X, ArrowRight, ShieldCheck, ArrowLeft, LogOut, FileText, Building
 import PanelOficina from './components/PanelOficina';
 import ParteTrabajo from './components/ParteTrabajo';
 import LandingPage from './components/LandingPage';
+import { color, texto, peso, interletra, espacio, radio, sombra } from './estilos/tokens';
+import Boton from './ui/Boton';
+import Tarjeta from './ui/Tarjeta';
+import Campo from './ui/Campo';
+import Etiqueta from './ui/Etiqueta';
 
 export default function App() {
     const [email, setEmail] = useState('');
@@ -98,77 +103,74 @@ export default function App() {
         if (!mostrarLogin) { return <LandingPage onEntrar={() => setMostrarLogin(true)} />; }
 
         return (
-            <div style={{ minHeight: '100vh', backgroundColor: '#fafafa', fontFamily: "'Inter', 'Helvetica Neue', sans-serif", position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <button onClick={() => setMostrarLogin(false)} style={{ position: 'absolute', top: '30px', left: '30px', display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '2px', cursor: 'pointer', color: '#1a1a1a' }}>
-                    <ArrowLeft size={16}/> Volver al Inicio
-                </button>
-                
-                <div style={{ width: '100%', maxWidth: '400px', padding: '50px 40px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', boxShadow: '0 10px 40px rgba(0,0,0,0.03)' }}>
-                    <h2 style={{ margin: '0 0 30px 0', fontSize: '24px', fontWeight: '300', letterSpacing: '4px', textTransform: 'uppercase', textAlign: 'center', color: '#1a1a1a' }}>
-                        Acceso Portal
+            <div style={{ minHeight: '100vh', backgroundColor: color.fondo, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: espacio.lg }}>
+                <Boton variante="fantasma" onClick={() => setMostrarLogin(false)} style={{ position: 'absolute', top: espacio.lg, left: espacio.lg }}>
+                    <ArrowLeft size={15}/> Volver al inicio
+                </Boton>
+
+                <Tarjeta relleno="amplio" style={{ width: '100%', maxWidth: '420px', boxShadow: sombra.media }}>
+                    <h2 style={{ margin: `0 0 ${espacio.xl} 0`, fontSize: texto.titulo, fontWeight: peso.maximo, letterSpacing: interletra.titulo, textAlign: 'center', color: color.petroleo }}>
+                        Acceso al portal
                     </h2>
-                    
+
                     {errorLogin && (
-                        <div style={{ padding: '15px', marginBottom: '25px', border: '1px solid #1a1a1a', color: '#1a1a1a', fontSize: '11px', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                        <div style={{ padding: espacio.sm, marginBottom: espacio.lg, border: `1px solid ${color.error}`, backgroundColor: color.errorSuave, color: color.error, fontSize: texto.base, borderRadius: radio.sutil, lineHeight: 1.45 }}>
                             {errorLogin}
                         </div>
                     )}
 
-                    <form onSubmit={manejarEnvio} style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
-                        
+                    <form onSubmit={manejarEnvio} style={{ display: 'flex', flexDirection: 'column', gap: espacio.md }}>
+                        <Campo etiqueta="Correo electrónico" type="email" value={email} onChange={(e)=>setEmail(e.target.value)} tamano="amplio" required />
                         <div>
-                            <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', color: '#64748b' }}>Correo Electrónico</label>
-                            <input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} style={{ width: '100%', padding: '14px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', backgroundColor: '#fafafa', fontSize: '14px' }} required />
-                        </div>
-                        <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                <label style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', color: '#64748b' }}>Contraseña</label>
-                                <button type="button" onClick={recuperarContrasena} style={{ background: 'none', border: 'none', color: '#1a1a1a', fontSize: '10px', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}>¿Olvidada?</button>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                <Etiqueta>Contraseña</Etiqueta>
+                                <button type="button" onClick={recuperarContrasena} style={{ background: 'none', border: 'none', color: color.vidrio, fontSize: texto.menor, cursor: 'pointer', padding: 0 }}>¿Olvidada?</button>
                             </div>
-                            <input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} style={{ width: '100%', padding: '14px', border: '1px solid #e5e7eb', outline: 'none', boxSizing: 'border-box', backgroundColor: '#fafafa', fontSize: '14px' }} required />
+                            <Campo type="password" value={password} onChange={(e)=>setPassword(e.target.value)} tamano="amplio" required />
                         </div>
-                        <button type="submit" style={{ padding: '18px', backgroundColor: '#1a1a1a', color: '#ffffff', border: 'none', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase', cursor: 'pointer', marginTop: '10px', transition: 'background 0.3s' }}>
-                            Entrar al Sistema
-                        </button>
+                        <Boton type="submit" tamano="amplio" ancho style={{ marginTop: espacio.xs }}>
+                            Entrar al sistema
+                        </Boton>
                     </form>
-
-                </div>
+                </Tarjeta>
             </div>
         );
     }
 
     return (
-        <div style={{ backgroundColor: '#fafafa', minHeight: '100vh', fontFamily: "'Inter', 'Helvetica Neue', sans-serif", color: '#1a1a1a' }}>
-            
-            <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: esMovil ? '20px' : '20px 50px', backgroundColor: '#ffffff', borderBottom: '1px solid #e5e7eb', position: 'sticky', top: 0, zIndex: 50 }}>
-                <div style={{ fontWeight: '900', fontSize: '20px', letterSpacing: '2px' }}>GESTIÓN<span style={{color: '#94a3b8'}}>PRO</span></div>
-                
+        <div style={{ backgroundColor: color.fondo, minHeight: '100vh', color: color.texto }}>
+
+            <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: esMovil ? espacio.md : `${espacio.md} ${espacio.xl}`, backgroundColor: color.superficie, borderBottom: `1px solid ${color.linea}`, position: 'sticky', top: 0, zIndex: 50 }}>
+                <div style={{ fontWeight: peso.maximo, fontSize: texto.mayor, letterSpacing: interletra.titulo, color: color.petroleo }}>GESTIÓN<span style={{ color: color.vidrio }}>PRO</span></div>
+
                 {esMovil && (
-                    <button onClick={() => setMenuMovilAbierto(!menuMovilAbierto)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1a1a1a' }}>{menuMovilAbierto ? <X size={24} /> : <Menu size={24} />}</button>
+                    <button onClick={() => setMenuMovilAbierto(!menuMovilAbierto)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: color.petroleo, padding: espacio.xxs, lineHeight: 0 }}>{menuMovilAbierto ? <X size={24} /> : <Menu size={24} />}</button>
                 )}
 
                 {!esMovil && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '30px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: espacio.lg }}>
                         <div style={{ textAlign: 'right' }}>
-                            <div style={{ color: '#1a1a1a', fontWeight: 'bold', fontSize: '12px', letterSpacing: '1px', textTransform: 'uppercase' }}>{nombreUsuario}</div>
-                            <div style={{ color: '#2563eb', fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', fontWeight: 'bold' }}>{esAdmin ? 'Administrador' : 'Operario'}</div>
+                            <div style={{ color: color.texto, fontWeight: peso.fuerte, fontSize: texto.base }}>{nombreUsuario}</div>
+                            <div style={{ color: color.vidrio, fontSize: texto.micro, letterSpacing: interletra.etiqueta, textTransform: 'uppercase', fontWeight: peso.maximo }}>{esAdmin ? 'Administrador' : 'Operario'}</div>
                         </div>
-                        <button onClick={cerrarSesion} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', backgroundColor: 'transparent', color: '#1a1a1a', border: '1px solid #1a1a1a', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' }}><LogOut size={14} /> Salir</button>
+                        <Boton variante="secundario" onClick={cerrarSesion}><LogOut size={14} /> Salir</Boton>
                     </div>
                 )}
             </header>
 
             {esMovil && menuMovilAbierto && (
-                <div style={{ position: 'absolute', top: '65px', left: 0, width: '100%', backgroundColor: '#ffffff', borderBottom: '1px solid #e5e7eb', zIndex: 40, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <button onClick={() => {setVistaActiva('redactar'); setMenuMovilAbierto(false);}} style={{ background: 'transparent', border: '1px solid #e5e7eb', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase', color: '#1a1a1a', padding: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}><FileText size={16} /> Redactar Parte</button>
-                    {esAdmin && ( <button onClick={() => {setVistaActiva('oficina'); setMenuMovilAbierto(false);}} style={{ background: '#1a1a1a', border: 'none', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase', color: '#ffffff', padding: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}><Building2 size={16} /> Panel Oficina</button> )}
-                    <button onClick={cerrarSesion} style={{ padding: '15px', backgroundColor: 'transparent', color: '#1a1a1a', border: '1px solid #1a1a1a', fontWeight: 'bold', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase', marginTop: '10px' }}>Cerrar Sesión</button>
+                <div style={{ position: 'absolute', top: '65px', left: 0, width: '100%', backgroundColor: color.superficie, borderBottom: `1px solid ${color.linea}`, boxShadow: sombra.media, zIndex: 40, padding: espacio.md, display: 'flex', flexDirection: 'column', gap: espacio.xs }}>
+                    <Boton variante="secundario" tamano="amplio" ancho onClick={() => {setVistaActiva('redactar'); setMenuMovilAbierto(false);}}><FileText size={16} /> Redactar parte</Boton>
+                    {esAdmin && ( <Boton tamano="amplio" ancho onClick={() => {setVistaActiva('oficina'); setMenuMovilAbierto(false);}}><Building2 size={16} /> Panel de oficina</Boton> )}
+                    <Boton variante="fantasma" tamano="amplio" ancho onClick={cerrarSesion} style={{ marginTop: espacio.xs }}><LogOut size={16} /> Cerrar sesión</Boton>
                 </div>
             )}
 
-            <main style={{ padding: esMovil ? '0px' : '40px' }}>
+            {/* Sin relleno en móvil: la vista de operario ya trae el suyo y en una
+                pantalla de teléfono cada píxel de margen se nota. */}
+            <main style={{ padding: esMovil ? '0px' : espacio.xl }}>
                 {vistaActiva === 'redactar' && <ParteTrabajo usuario={usuarioLogueado} esAdmin={esAdmin} volverOficina={() => setVistaActiva('oficina')} />}
-                {vistaActiva === 'oficina' && esAdmin && <div style={{ width: '100%', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', maxWidth: '1200px', margin: '0 auto' }}><PanelOficina cambiarVista={() => setVistaActiva('redactar')} /></div>}
+                {vistaActiva === 'oficina' && esAdmin && <Tarjeta relleno="ninguno" style={{ width: '100%', maxWidth: '1280px', margin: '0 auto', overflow: 'hidden' }}><PanelOficina cambiarVista={() => setVistaActiva('redactar')} /></Tarjeta>}
             </main>
         </div>
     );
