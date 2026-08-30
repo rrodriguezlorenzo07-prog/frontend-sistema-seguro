@@ -28,12 +28,28 @@ service firebase.storage {
              : '';
     }
 
-    // Mismo criterio que firestore.rules: el permiso real vive en roles/{uid},
-    // colección cerrada a los clientes. Storage la consulta con firestore.get().
+    // El rol viaja en el propio token, como custom claim.
+    //
+    // NO LO RESUELVAS CON firestore.get() DESDE AQUÍ. Se intentó el 30/08/2026 y la
+    // llamada entre servicios funciona en el emulador pero NO en producción: con un
+    // mismo ID token de un admin real, Firestore devolvió 200 sobre una colección
+    // restringida a admin —que resuelve el rol con get(roles/{uid}) dentro de su
+    // propio servicio— y Storage devolvió 403 sobre la firma. Token válido, rol
+    // correcto, y aun así denegado. Mientras estuvo desplegado, la oficina no pudo
+    // ver ninguna firma.
+    //
+    // El claim se evalúa en local, sin depender de otro servicio y sin coste de
+    // lectura. roles/{uid} sigue siendo la fuente de verdad: la Cloud Function de la
+    // Fase D.1 escribe los dos a la vez y deshace el cambio si no puede, para que no
+    // vuelvan a decir cosas distintas. Los admins previos se rellenaron con
+    // scripts/backfill-claims-admin.cjs.
+    //
+    // Un admin ya logueado no ve el claim hasta que su token se renueva: hasta 1 hora,
+    // o cerrando sesión y volviendo a entrar.
     function esAdmin() {
       return autenticado()
-             && firestore.exists(/databases/(default)/documents/roles/$(request.auth.uid))
-             && firestore.get(/databases/(default)/documents/roles/$(request.auth.uid)).data.admin == true;
+             && 'admin' in request.auth.token
+             && request.auth.token.admin == true;
     }
 
     match /firmas/{archivo} {
@@ -51,18 +67,35 @@ service firebase.storage {
       // Solo oficina, o el propio operario que la firmó.
       allow read: if esAdmin() || esSuya();
 
-      // Subir sigue igual que hasta ahora. El metadato `creador` todavía no es
-      // obligatorio —el código que lo fija aún no está desplegado—, pero si viene,
-      // tiene que ser el de quien sube: así nadie puede atribuir una firma a otro.
+      // NO AÑADAS AQUÍ UNA COMPROBACIÓN DEL METADATO `creador`. La hubo el 30/08/2026
+      // y tumbó las subidas en producción: pasaron de funcionar al 100% a fallar al
+      // 100% en el minuto en que entró en vigor, mientras en el emulador el flujo real
+      // pasaba sin problema. La causa más probable es que request.resource.metadata
+      // llegue nulo cuando el cliente no manda metadatos —el emulador devuelve un mapa
+      // vacío—, y 'creador' in null revienta la evaluación.
+      //
+      // Subir la firma es el paso que bloquea al operario en obra y no puede depender
+      // de una expresión que no se pueda verificar contra producción. Lo que se perdía
+      // era poco: solo impedía etiquetar una firma con el correo de otro, y eso no da
+      // acceso a nada ajeno —como mucho hace legible para un tercero un archivo que el
+      // propio atacante ha subido—.
       allow create: if autenticado()
                     && request.resource.size < 2 * 1024 * 1024
-                    && request.resource.contentType == 'image/png'
-                    && (
-                        !('creador' in request.resource.metadata)
-                        || request.resource.metadata.creador.lower() == correo()
-                       );
+                    && request.resource.contentType == 'image/png';
 
       // Una firma es un documento de conformidad: no se reemplaza ni se borra.
+      //
+      // OJO, ESTO NO IMPIDE SOBRESCRIBIR. Comprobado en el emulador el 30/08/2026: una
+      // subida sobre una ruta YA OCUPADA se evalúa como `create`, no como `update`, así
+      // que pasa por la regla de arriba y este `if false` no llega a mirarse. Un
+      // operario que conozca la ruta de su propia firma —y la conoce, está en su
+      // parte— puede reemplazarla después de haberla firmado.
+      //
+      // El cierre es añadir `&& resource == null` al create. No se hace aquí a
+      // propósito: sería un cambio no pedido sobre la única regla que hoy desbloquea al
+      // operario en obra, el mismo sitio que provocó el incidente de esta mañana, y
+      // verificarlo en producción obligaría a intentar sobrescribir una firma real.
+      // Merece su propio cambio, con su propia comprobación.
       allow update, delete: if false;
     }
 

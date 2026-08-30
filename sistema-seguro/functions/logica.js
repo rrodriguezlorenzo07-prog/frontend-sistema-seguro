@@ -60,18 +60,47 @@ async function cambiarPermisoAdmin({ solicitanteUid, uid, email, esAdmin }) {
     }
 
     const ref = getFirestore().doc(`roles/${uidDestino}`);
+    const estadoPrevio = await ref.get();
+
     await ref.set({
         admin: esAdmin,
         actualizadoPor: solicitanteUid,
         actualizadoEn: FieldValue.serverTimestamp()
     }, { merge: true });
 
-    // Lectura de vuelta: se devuelve lo que quedó escrito, no lo que se pidió.
+    // El mismo permiso, también como custom claim del token. Storage lo necesita:
+    // storage.rules no puede resolver roles/{uid} porque la llamada entre servicios
+    // funciona en el emulador y NO en producción (comprobado el 30/08/2026). El claim
+    // se evalúa en local, sin depender de Firestore.
+    //
+    // roles/{uid} sigue siendo la fuente de verdad y por eso se escribe primero. Si el
+    // claim falla, se deshace la escritura anterior: es preferible no conceder nada a
+    // dejar los dos sitios diciendo cosas distintas, que es justo lo que nos costó
+    // una mañana de incidente.
+    try {
+        const usuario = await getAuth().getUser(uidDestino);
+        const claims = { ...(usuario.customClaims || {}) };
+        if (esAdmin) claims.admin = true;
+        else delete claims.admin;   // se retira la llave entera, no se deja en false
+        await getAuth().setCustomUserClaims(uidDestino, claims);
+    } catch (error) {
+        if (estadoPrevio.exists) {
+            await ref.set(estadoPrevio.data());
+        } else {
+            await ref.delete();
+        }
+        throw new HttpsError('internal', `No se pudo actualizar el token de acceso (${error.message}). No se ha cambiado nada.`);
+    }
+
+    // Lectura de vuelta de LOS DOS sitios: se devuelve lo que quedó escrito, no lo
+    // que se pidió.
     const confirmacion = await ref.get();
+    const usuarioFinal = await getAuth().getUser(uidDestino);
     return {
         ok: true,
         uid: uidDestino,
-        admin: confirmacion.exists && confirmacion.data().admin === true
+        admin: confirmacion.exists && confirmacion.data().admin === true,
+        claim: usuarioFinal.customClaims?.admin === true
     };
 }
 

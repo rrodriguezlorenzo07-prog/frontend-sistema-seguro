@@ -37,13 +37,20 @@ const leerRol = async (uid) => {
     return snap.exists ? snap.data() : null;
 };
 
+// El permiso vive en dos sitios desde la fase 2 de 3b: roles/{uid} es la fuente de
+// verdad y el custom claim es su reflejo en el token, que es lo único que Storage
+// puede leer. Que se desincronicen es exactamente el fallo que hubo que arreglar.
+const leerClaims = async (uid) => (await auth.getUser(uid)).customClaims || {};
+
 (async () => {
     // ---- Semilla ---------------------------------------------------------
     const jefe = await auth.createUser({ email: 'oficina@empresa.com', password: 'secreto123' });
     const juan = await auth.createUser({ email: 'juan@empresa.com', password: 'secreto123' });
     const ana = await auth.createUser({ email: 'ana@empresa.com', password: 'secreto123' });
 
+    // Se siembra en los dos sitios, como deja las cosas scripts/backfill-claims-admin.cjs
     await db.doc(`roles/${jefe.uid}`).set({ admin: true });
+    await auth.setCustomUserClaims(jefe.uid, { admin: true });
 
     console.log('Semilla:');
     console.log(`   jefe (admin) uid = ${jefe.uid}`);
@@ -66,6 +73,9 @@ const leerRol = async (uid) => {
     comprobar('roles/{uid} existe y admin === true', rolJuan?.admin === true);
     comprobar('queda registrado quién lo cambió', rolJuan?.actualizadoPor === jefe.uid);
     comprobar('queda registrado cuándo', !!rolJuan?.actualizadoEn);
+    comprobar('el custom claim admin queda puesto', (await leerClaims(juan.uid)).admin === true);
+    comprobar('la función informa de los dos sitios', resultado.admin === true && resultado.claim === true,
+              JSON.stringify({ admin: resultado.admin, claim: resultado.claim }));
 
     // ---- CASO 2: Juan ya puede ejercer de admin --------------------------
     console.log('\n─── CASO 2: Juan, ya admin, puede ascender a Ana ───');
@@ -76,6 +86,9 @@ const leerRol = async (uid) => {
     console.log('\n─── CASO 3: el jefe retira el permiso a Ana ───');
     await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, esAdmin: false });
     comprobar('roles/{uid}.admin queda en false', (await leerRol(ana.uid))?.admin === false);
+    const claimsAna = await leerClaims(ana.uid);
+    comprobar('el custom claim se retira entero, no se deja en false',
+              !('admin' in claimsAna), JSON.stringify(claimsAna));
 
     // ---- CASO 4: un no-admin no puede ------------------------------------
     console.log('\n─── CASO 4: Ana (ya sin permiso) intenta ascenderse ───');
@@ -95,6 +108,16 @@ const leerRol = async (uid) => {
     } catch (error) {
         comprobar('bloqueado con failed-precondition', String(error.code).includes('failed-precondition'), error.message);
         comprobar('y el jefe conserva su acceso', (await leerRol(jefe.uid))?.admin === true);
+        comprobar('y conserva también su claim', (await leerClaims(jefe.uid)).admin === true);
+    }
+
+    // ---- CASO 7: los dos sitios nunca se separan -------------------------
+    console.log('\n─── CASO 7: conceder y retirar deja siempre los dos sitios de acuerdo ───');
+    for (const valor of [true, false, true]) {
+        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, esAdmin: valor });
+        const enFirestore = (await leerRol(ana.uid))?.admin === true;
+        const enToken = (await leerClaims(ana.uid)).admin === true;
+        comprobar(`esAdmin=${valor} -> roles/=${enFirestore}, claim=${enToken}`, enFirestore === valor && enToken === valor);
     }
 
     // ---- CASO 6: email sin cuenta de acceso ------------------------------
