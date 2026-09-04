@@ -1,16 +1,31 @@
 // @ts-check
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
-import { collection, getDocs, query, where, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadString } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
-import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin } from 'lucide-react';
+import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin, Clock, Truck, Wrench, Users, AlertTriangle, ArrowLeft } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import { color, texto, peso, interletra, espacio, radio, objetivo } from '../estilos/tokens';
 import Boton from '../ui/Boton';
 import Insignia from '../ui/Insignia';
+import Tarjeta from '../ui/Tarjeta';
+import Etiqueta from '../ui/Etiqueta';
+import { destinoDeAsignacion, normalizarHorasReportadas, contrasteDeJornada, ordenarPorHora } from '../logica/cuadrantes';
 
 export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
+  // --- Asignación del cuadrante (Pieza 2) ---
+  // El operario ya no parte de un formulario en blanco: primero elige de lo que la
+  // oficina le ha asignado hoy. La creación libre sigue existiendo, pero de segunda.
+  const [asignaciones, setAsignaciones] = useState([]);
+  const [asignacionElegida, setAsignacionElegida] = useState(null);
+  const [cargandoAsignaciones, setCargandoAsignaciones] = useState(true);
+  const [modoLibre, setModoLibre] = useState(false);
+
+  // Horas reportadas. INFORMATIVAS (D5): no entran en el cálculo de nómina.
+  const [horasTaller, setHorasTaller] = useState('');
+  const [horasCalle, setHorasCalle] = useState('');
+
   const [obrasList, setObrasList] = useState([]);
   const [inventario, setInventario] = useState([]);
   const [obraSeleccionada, setObraSeleccionada] = useState(null);
@@ -51,15 +66,39 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   useEffect(() => {
     const cargarCatalogos = async () => {
       try {
-        const [resTrab, resObras, resInv] = await Promise.all([
-          getDocs(query(collection(db, 'trabajadores'), where("email", "==", usuario.email.toLowerCase().trim()))),
+        const correo = usuario.email.toLowerCase().trim();
+        const hoy = new Date().toISOString().slice(0, 10);
+
+        // El filtro por operarioEmails NO es opcional: la regla de cuadrantes exige
+        // que la consulta lo lleve, porque es lo que impide que un operario liste las
+        // asignaciones de los demás. Sin él la consulta no devuelve menos resultados:
+        // falla entera. El índice compuesto que sostiene este orden ya está desplegado.
+        const [resTrab, resObras, resInv, resAsig] = await Promise.all([
+          getDocs(query(collection(db, 'trabajadores'), where("email", "==", correo))),
           getDocs(collection(db, 'obras')),
-          getDocs(collection(db, 'inventario'))
+          getDocs(collection(db, 'inventario')),
+          getDocs(query(
+            collection(db, 'cuadrantes'),
+            where('operarioEmails', 'array-contains', correo),
+            where('fecha', '==', hoy),
+            orderBy('horaInicio')
+          ))
         ]);
         if (!resTrab.empty) { setNombreOficial(resTrab.docs[0].data().nombre); setTrabajadorId(resTrab.docs[0].id); }
         setObrasList(resObras.docs.map(d => ({ id: d.id, ...d.data() })));
         setInventario(resInv.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (error) { console.error("Error:", error); }
+
+        const delDia = ordenarPorHora(resAsig.docs.map(d => ({ id: d.id, ...d.data() })));
+        setAsignaciones(delDia);
+        // Con una sola asignación no se hace elegir: se entra directo a su parte.
+        if (delDia.length === 1) setAsignacionElegida(delDia[0]);
+      } catch (error) {
+        // Si falla la consulta de cuadrantes no se deja al operario sin poder trabajar:
+        // se cae a la creación libre, que es la vía que existía antes de todo esto.
+        console.error("Error:", error);
+      } finally {
+        setCargandoAsignaciones(false);
+      }
     };
     cargarCatalogos();
   }, [usuario]);
@@ -164,13 +203,26 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         }
     }
 
-    const nombreFinalObra = esOtraObra ? obraNombreManual : obraSeleccionada?.nombre;
+    // Con asignación, el destino sale del cuadrante y no de lo que elija el operario:
+    // ese es el sentido de planificar. Sin ella, el camino de siempre.
+    const desdeAsignacion = asignacionElegida ? destinoDeAsignacion(asignacionElegida) : null;
+    const nombreFinalObra = desdeAsignacion
+        ? desdeAsignacion.obra
+        : (esOtraObra ? obraNombreManual : obraSeleccionada?.nombre);
 
     const payloadParte = {
         obra: nombreFinalObra,
         // Referencias por id junto al nombre. Si la obra se escribió a mano,
         // obraId queda en null a propósito: es texto libre, no un proyecto del catálogo.
-        obraId: esOtraObra ? null : (obraSeleccionada?.id ?? null),
+        // Un destino de taller también deja obraId en null: no es una obra del catálogo.
+        obraId: desdeAsignacion ? desdeAsignacion.obraId : (esOtraObra ? null : (obraSeleccionada?.id ?? null)),
+        // De qué asignación sale este parte. null si se creó por la vía libre, que es
+        // lo que permite medir cuántos días se salen del plan.
+        asignacionId: asignacionElegida?.id ?? null,
+        // Horas reportadas. Informativas (D5): la nómina sigue siendo base mensual fija
+        // más las horas extra que la oficina asigna al validar.
+        horasTaller: normalizarHorasReportadas(horasTaller),
+        horasCalle: normalizarHorasReportadas(horasCalle),
         trabajadorId,
         tareasRealizadas: tareasRealizadas, // Array estructurado: [{ubicacion, descripcion}]
         trabajo: trabajoLibre,
@@ -202,6 +254,10 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
     });
 
     setObraSeleccionada(null); setEsOtraObra(false); setObraNombreManual('');
+    // La asignación también se suelta: si el operario tiene dos bloques hoy, vuelve a
+    // la lista para elegir el segundo en vez de repetir el primero sin darse cuenta.
+    setAsignacionElegida(null); setModoLibre(false);
+    setHorasTaller(''); setHorasCalle('');
     setTrabajoLibre(''); setTareasRealizadas([]); setMaterialesUsados([]);
     firmaRef.current.clear();
 
@@ -228,6 +284,9 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         setMensaje({ texto: '', tipo: '' });
     }, 4000);
   };
+
+  // Aviso derivado, no estado: se recalcula solo al teclear.
+  const { aviso: avisoJornada } = contrasteDeJornada(horasTaller, horasCalle);
 
   const btnStyle = (activo) => ({
       flex: 1, padding: espacio.md, minHeight: objetivo.amplio, borderRadius: radio.sutil, backgroundColor: activo ? color.petroleo : color.superficie, color: activo ? color.textoSobreOscuro : color.textoSuave,
@@ -256,14 +315,65 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
       </div>
 
       {!vistaMisPartes ? (
+        (!asignacionElegida && !modoLibre) ? (
+          <SelectorDeAsignacion
+            asignaciones={asignaciones}
+            cargando={cargandoAsignaciones}
+            onElegir={setAsignacionElegida}
+            onLibre={() => setModoLibre(true)}
+          />
+        ) : (
         <form onSubmit={enviarParte} style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
           
           <div style={{ padding: '15px', border: `1px solid ${color.linea}`, fontSize: '12px', color: color.texto, letterSpacing: '1px', textTransform: 'uppercase', textAlign: 'center' }}>
               Operario activo: <strong>{nombreOficial}</strong>
           </div>
 
+          {/* DESTINO. Con asignación es un resumen de solo lectura: el sentido de
+              planificar es que el operario no vuelva a elegir dónde está. Sin ella,
+              el selector de siempre. */}
+          {asignacionElegida ? (
+            <Tarjeta tono="tenida" relleno="ajustado">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: espacio.sm }}>
+                {asignacionElegida.destinoTipo === 'taller'
+                  ? <Wrench size={18} style={{ color: color.vidrio, flexShrink: 0, marginTop: '2px' }} />
+                  : <MapPin size={18} style={{ color: color.vidrio, flexShrink: 0, marginTop: '2px' }} />}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Etiqueta>Tu asignación de hoy</Etiqueta>
+                  <div style={{ fontSize: texto.medio, fontWeight: peso.fuerte, letterSpacing: interletra.titulo, marginTop: '2px' }}>
+                    {asignacionElegida.destinoTipo === 'taller' ? 'Taller' : asignacionElegida.obraNombre}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: espacio.sm, marginTop: espacio.xs, fontSize: texto.menor, color: color.textoSuave }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Clock size={13} /> {asignacionElegida.horaInicio}–{asignacionElegida.horaFin}
+                    </span>
+                    {asignacionElegida.vehiculoNombre ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Truck size={13} /> {asignacionElegida.vehiculoNombre}
+                      </span>
+                    ) : null}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Users size={13} /> {asignacionElegida.cuadrillaNombre}
+                    </span>
+                  </div>
+                </div>
+                {asignaciones.length > 1 && (
+                  <Boton tamano="pequeno" variante="fantasma" onClick={() => setAsignacionElegida(null)}>
+                    Cambiar
+                  </Boton>
+                )}
+              </div>
+            </Tarjeta>
+          ) : (
           <div>
-            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>Lugar de Trabajo / Hotel</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: espacio.sm, gap: espacio.sm, flexWrap: 'wrap' }}>
+              <Etiqueta>Lugar de trabajo / Hotel</Etiqueta>
+              {asignaciones.length > 0 && (
+                <Boton tamano="pequeno" variante="fantasma" onClick={() => setModoLibre(false)}>
+                  <ArrowLeft size={13} /> Volver a mi asignación
+                </Boton>
+              )}
+            </div>
             <select onChange={(e) => {
                 const val = e.target.value;
                 if(val==='OTRA') { setEsOtraObra(true); setObraSeleccionada(null); }
@@ -275,6 +385,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
             </select>
             {esOtraObra && <input type="text" value={obraNombreManual} onChange={(e) => setObraNombreManual(e.target.value)} required placeholder="Nombre del cliente o proyecto..." style={{ width: '100%', padding: '15px', border: `1px solid ${color.petroleo}`, marginTop: '10px', boxSizing: 'border-box' }} />}
           </div>
+          )}
 
           {/* === SECCIÓN MEJORADA DE HABITACIONES Y TAREAS === */}
           <div style={{ padding: '20px', border: `1px solid ${color.linea}`, backgroundColor: color.fondo }}>
@@ -337,6 +448,39 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
             <textarea value={trabajoLibre} onChange={(e) => setTrabajoLibre(e.target.value)} rows={2} placeholder="Información adicional que no encaje en las tareas..." style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', backgroundColor: color.fondo, boxSizing: 'border-box' }} />
           </div>
 
+          {/* HORAS REPORTADAS. Informativas (D5): NO tocan la nómina, que sigue siendo
+              base mensual fija menos ausencias, más las horas extra que asigna la oficina
+              al validar. Aquí solo se recoge el reparto real del día. */}
+          <div style={{ padding: '20px', border: `1px solid ${color.linea}`, backgroundColor: color.fondo }}>
+              <Etiqueta>Horas de hoy</Etiqueta>
+              <p style={{ margin: `${espacio.xxs} 0 ${espacio.md}`, fontSize: texto.menor, color: color.textoTenue, lineHeight: 1.45 }}>
+                  Para saber cuánto se va en taller y cuánto en obra. No afecta a tu nómina.
+              </p>
+              <div style={{ display: 'flex', gap: espacio.sm }}>
+                  <label style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: texto.menor, color: color.textoSuave, marginBottom: espacio.xxs }}>
+                          <Wrench size={13} /> Taller
+                      </span>
+                      <input type="number" inputMode="decimal" step="0.5" min="0" max="24" value={horasTaller}
+                          onChange={(e) => setHorasTaller(e.target.value)} placeholder="0"
+                          style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', boxSizing: 'border-box', fontSize: '14px', minHeight: objetivo.amplio }} />
+                  </label>
+                  <label style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: texto.menor, color: color.textoSuave, marginBottom: espacio.xxs }}>
+                          <MapPin size={13} /> Calle
+                      </span>
+                      <input type="number" inputMode="decimal" step="0.5" min="0" max="24" value={horasCalle}
+                          onChange={(e) => setHorasCalle(e.target.value)} placeholder="0"
+                          style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', boxSizing: 'border-box', fontSize: '14px', minHeight: objetivo.amplio }} />
+                  </label>
+              </div>
+              {avisoJornada && (
+                  <p style={{ margin: `${espacio.sm} 0 0`, fontSize: texto.menor, color: color.aviso, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <AlertTriangle size={13} /> {avisoJornada}
+                  </p>
+              )}
+          </div>
+
           <div style={{ padding: '20px', border: `1px solid ${color.petroleo}` }}>
               <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', fontWeight: 'bold', color: color.texto, fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><PenTool size={16}/> Firma de Conformidad</span>
@@ -361,6 +505,7 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
               </div>
           )}
         </form>
+        )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {misPartes.map(p => (
@@ -378,4 +523,110 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
       )}
     </div>
   );
+}
+/**
+ * Lo primero que ve el operario al abrir: qué le toca hoy.
+ *
+ * Sustituye al formulario en blanco. Tres situaciones, y las tres tienen que quedar
+ * claras sin que nadie pregunte:
+ *
+ *   · UNA asignación   → no llega a verse: el padre la elige sola y entra al parte.
+ *   · VARIAS           → tarjetas para elegir. Con dos bloques en un día, equivocarse
+ *                        de obra es fácil, así que se muestran destino, horario y
+ *                        cuadrilla antes de decidir.
+ *   · NINGUNA          → aviso explícito. NO se bloquea la creación libre: si la
+ *                        oficina no ha planificado, el operario tiene que poder
+ *                        trabajar igual. Pero se le dice por qué está viendo esto, en
+ *                        vez de dejarle un formulario vacío que no explica nada.
+ */
+function SelectorDeAsignacion({ asignaciones, cargando, onElegir, onLibre }) {
+    if (cargando) {
+        return (
+            <div style={{ padding: espacio.xxl, textAlign: 'center', color: color.textoTenue, fontSize: texto.menor, letterSpacing: interletra.etiqueta, textTransform: 'uppercase' }}>
+                Buscando tu asignación…
+            </div>
+        );
+    }
+
+    if (asignaciones.length === 0) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: espacio.lg }}>
+                <Tarjeta tono="tenida" style={{ borderLeft: `3px solid ${color.aviso}` }}>
+                    <div style={{ display: 'flex', gap: espacio.sm, alignItems: 'flex-start' }}>
+                        <AlertTriangle size={20} style={{ color: color.aviso, flexShrink: 0, marginTop: '2px' }} />
+                        <div>
+                            <h3 style={{ margin: 0, fontSize: texto.medio, fontWeight: peso.fuerte, letterSpacing: interletra.titulo }}>
+                                Hoy no tienes asignación
+                            </h3>
+                            <p style={{ margin: `${espacio.xs} 0 0`, fontSize: texto.base, color: color.textoSuave, lineHeight: 1.5 }}>
+                                La oficina no ha planificado nada para ti. Avísales si crees que es un
+                                error — y si ya sabes dónde vas, puedes hacer el parte igualmente.
+                            </p>
+                        </div>
+                    </div>
+                </Tarjeta>
+
+                <Boton tamano="amplio" ancho onClick={onLibre}>
+                    <FileText size={16} /> Hacer el parte de todas formas
+                </Boton>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: espacio.md }}>
+            <div>
+                <h3 style={{ margin: 0, fontSize: texto.mayor, fontWeight: peso.fuerte, letterSpacing: interletra.titulo }}>
+                    ¿Cuál de los dos?
+                </h3>
+                <p style={{ margin: `${espacio.xxs} 0 0`, fontSize: texto.menor, color: color.textoSuave }}>
+                    Tienes {asignaciones.length} bloques hoy. Elige el del parte que vas a hacer.
+                </p>
+            </div>
+
+            {asignaciones.map((a) => (
+                <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => onElegir(a)}
+                    style={{
+                        display: 'block', width: '100%', textAlign: 'left', padding: 0,
+                        background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit'
+                    }}
+                >
+                    <Tarjeta style={{ borderLeft: `3px solid ${a.destinoTipo === 'taller' ? color.textoTenue : color.vidrio}` }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: espacio.sm }}>
+                            {a.destinoTipo === 'taller'
+                                ? <Wrench size={18} style={{ color: color.vidrio, flexShrink: 0, marginTop: '2px' }} />
+                                : <MapPin size={18} style={{ color: color.vidrio, flexShrink: 0, marginTop: '2px' }} />}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: texto.medio, fontWeight: peso.fuerte, letterSpacing: interletra.titulo }}>
+                                    {a.destinoTipo === 'taller' ? 'Taller' : a.obraNombre}
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: espacio.sm, marginTop: espacio.xs, fontSize: texto.menor, color: color.textoSuave }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <Clock size={13} /> {a.horaInicio}–{a.horaFin}
+                                    </span>
+                                    {a.vehiculoNombre ? (
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <Truck size={13} /> {a.vehiculoNombre}
+                                        </span>
+                                    ) : null}
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <Users size={13} /> {a.cuadrillaNombre}
+                                    </span>
+                                </div>
+                            </div>
+                            {a.estado === 'parte_enviado' ? <Insignia tono="exito">Enviado</Insignia> : null}
+                        </div>
+                    </Tarjeta>
+                </button>
+            ))}
+
+            {/* La vía libre sigue existiendo, pero deliberadamente en segundo plano. */}
+            <Boton variante="fantasma" onClick={onLibre}>
+                Ninguno de estos — hacer un parte libre
+            </Boton>
+        </div>
+    );
 }

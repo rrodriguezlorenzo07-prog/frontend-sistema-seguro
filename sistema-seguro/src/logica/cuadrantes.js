@@ -241,3 +241,56 @@ export function asignacionVigente(asignaciones, minutosAhora) {
     // estuvo, en vez de una pantalla vacía.
     return siguiente || lista[lista.length - 1];
 }
+
+/**
+ * Qué obra escribe en el parte una asignación.
+ *
+ * Un destino de TALLER no tiene obra del catálogo, pero el parte sí necesita un valor
+ * en `obra`: las reglas lo exigen y sin él no se puede crear. Se escribe "Taller" como
+ * nombre y `obraId` en null — la misma forma que ya tiene un parte de obra escrita a
+ * mano, así que nada de lo que lee partes aguas abajo necesita un caso nuevo.
+ *
+ * @param {Cuadrante} asignacion
+ * @returns {{obra: string, obraId: string|null}}
+ */
+export function destinoDeAsignacion(asignacion) {
+    if (!asignacion) return { obra: '', obraId: null };
+    if (asignacion.destinoTipo === 'taller') return { obra: 'Taller', obraId: null };
+    return { obra: asignacion.obraNombre || '', obraId: asignacion.obraId || null };
+}
+
+/**
+ * Normaliza una hora reportada por el operario.
+ *
+ * Son informativas (D5): no tocan la nómina, que sigue calculando la base mensual fija
+ * y las horas extra asignadas en validación. Aun así se limpian, porque acaban en un
+ * documento y un "" o un negativo ensuciarían cualquier suma posterior.
+ *
+ * Se admiten medias horas y se corta en 24: más de un día en una jornada es un error de
+ * tecleo, no un dato.
+ *
+ * @param {string|number} valor
+ * @returns {number}
+ */
+export function normalizarHorasReportadas(valor) {
+    const n = Number(String(valor ?? '').replace(',', '.'));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(Math.round(n * 2) / 2, 24);
+}
+
+/**
+ * ¿Suman una jornada creíble?
+ *
+ * No bloquea nada: devuelve un aviso para enseñarlo, porque una jornada de 14 h puede
+ * ser real y no le corresponde a la aplicación llamar mentiroso al operario.
+ *
+ * @param {number} horasTaller
+ * @param {number} horasCalle
+ * @returns {{total: number, aviso: string|null}}
+ */
+export function contrasteDeJornada(horasTaller, horasCalle) {
+    const total = normalizarHorasReportadas(horasTaller) + normalizarHorasReportadas(horasCalle);
+    if (total === 0) return { total, aviso: null };
+    if (total > 12) return { total, aviso: `Has apuntado ${total} h en total. Compruébalo antes de enviar.` };
+    return { total, aviso: null };
+}

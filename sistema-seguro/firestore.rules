@@ -53,11 +53,21 @@ service cloud.firestore {
     match /partes_de_trabajo/{parteId} {
 
       // Lo único que el operario puede enviar al crear un parte.
-      // Coincide exactamente con el payload de ParteTrabajo.jsx:130-142.
+      // Coincide exactamente con el payload de ParteTrabajo.jsx.
+      //
+      // AMPLIADA (Pieza 2), solo con campos nuevos:
+      //   asignacionId  de qué cuadrante sale el parte; null si se creó libre
+      //   horasTaller   horas reportadas por el operario, INFORMATIVAS (D5)
+      //   horasCalle    idem. No entran en el cálculo de nómina: las normales son
+      //                 base mensual fija y las extra se asignan al validar.
+      //
+      // hasOnly() rechaza cualquier campo fuera de esta lista, así que añadir un
+      // campo en el cliente sin tocarla aquí deja al operario sin poder enviar.
       function camposDelOperario() {
         return ['obra', 'tareasRealizadas', 'trabajo', 'materialesUsados', 'firma',
                 'creador', 'nombreTrabajador', 'fecha', 'hora', 'timestamp', 'estado',
-                'obraId', 'trabajadorId'];
+                'obraId', 'trabajadorId',
+                'asignacionId', 'horasTaller', 'horasCalle'];
       }
 
       // Lo que la oficina escribe al validar (PanelOficina.jsx:251).

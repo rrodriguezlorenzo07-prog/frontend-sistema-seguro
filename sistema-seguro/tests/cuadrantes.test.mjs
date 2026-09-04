@@ -19,7 +19,10 @@ import {
     filasDelTablero,
     correosDeCuadrilla,
     construirAsignacion,
-    asignacionVigente
+    asignacionVigente,
+    destinoDeAsignacion,
+    normalizarHorasReportadas,
+    contrasteDeJornada
 } from '../src/logica/cuadrantes.js';
 
 // ----------------------------------------------------------------- minutosDe
@@ -313,5 +316,68 @@ test('asignacionVigente', async (t) => {
     });
     await t.test('PASA · el fin es exclusivo: a las 14:00 ya no está en curso', () => {
         assert.equal(asignacionVigente([manana], 14 * 60).id, 'manana');
+    });
+});
+
+// ----------------------------------------------------- destinoDeAsignacion
+
+test('destinoDeAsignacion', async (t) => {
+    await t.test('PASA · una obra da nombre e id', () => {
+        assert.deepEqual(
+            destinoDeAsignacion({ destinoTipo: 'obra', obraId: 'o1', obraNombre: 'Hotel Sol' }),
+            { obra: 'Hotel Sol', obraId: 'o1' }
+        );
+    });
+    await t.test('PASA · el TALLER escribe "Taller" y obraId null', () => {
+        // El parte necesita un valor en `obra` porque las reglas lo exigen.
+        assert.deepEqual(
+            destinoDeAsignacion({ destinoTipo: 'taller', obraId: null, obraNombre: null }),
+            { obra: 'Taller', obraId: null }
+        );
+    });
+    await t.test('PASA · sin asignación no revienta', () => {
+        assert.deepEqual(destinoDeAsignacion(null), { obra: '', obraId: null });
+    });
+});
+
+// ------------------------------------------------ normalizarHorasReportadas
+
+test('normalizarHorasReportadas', async (t) => {
+    await t.test('PASA · un número normal pasa igual', () => {
+        assert.equal(normalizarHorasReportadas(8), 8);
+    });
+    await t.test('PASA · acepta la coma decimal que teclea la gente', () => {
+        assert.equal(normalizarHorasReportadas('4,5'), 4.5);
+    });
+    await t.test('PASA · redondea a la media hora', () => {
+        assert.equal(normalizarHorasReportadas(3.7), 3.5);
+        assert.equal(normalizarHorasReportadas(3.8), 4);
+    });
+    await t.test('PASA · vacío, texto y negativo dan 0', () => {
+        assert.equal(normalizarHorasReportadas(''), 0);
+        assert.equal(normalizarHorasReportadas('nada'), 0);
+        assert.equal(normalizarHorasReportadas(-3), 0);
+        assert.equal(normalizarHorasReportadas(undefined), 0);
+    });
+    await t.test('PASA · corta en 24: más de un día es un error de tecleo', () => {
+        assert.equal(normalizarHorasReportadas(100), 24);
+    });
+});
+
+// ---------------------------------------------------------- contrasteDeJornada
+
+test('contrasteDeJornada', async (t) => {
+    await t.test('PASA · una jornada normal no avisa', () => {
+        const r = contrasteDeJornada(4, 4);
+        assert.equal(r.total, 8);
+        assert.equal(r.aviso, null);
+    });
+    await t.test('PASA · sin horas apuntadas no avisa', () => {
+        assert.equal(contrasteDeJornada(0, 0).aviso, null);
+    });
+    await t.test('PASA · más de 12 h avisa, pero NO bloquea', () => {
+        const r = contrasteDeJornada(8, 6);
+        assert.equal(r.total, 14);
+        assert.match(r.aviso, /14 h/);
     });
 });
