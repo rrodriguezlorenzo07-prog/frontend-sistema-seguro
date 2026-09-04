@@ -191,4 +191,57 @@
  * @typedef {[string, {trabajadorId: string|null, nombre: string, horasExtra: number}]} FilaHorasExtra
  */
 
+// ----------------------------------------------------------------- planificación
+
+/**
+ * Grupo estable de operarios. Vive en `cuadrillas/{id}`.
+ *
+ * No confundir con el array `cuadrilla` que la oficina arma al validar un parte: aquel
+ * se compone DESPUÉS del trabajo y lleva horas extra; esto se compone ANTES y no sabe
+ * nada de horas.
+ *
+ * @typedef {Object} Cuadrilla
+ * @property {string} [id]
+ * @property {string} nombre
+ * @property {Array<{trabajadorId: string|null, nombre: string, email: string}>} operarios
+ * @property {boolean} [papelera]
+ */
+
+/**
+ * Furgoneta o vehículo de empresa. Vive en `vehiculos/{id}`.
+ * @typedef {Object} Vehiculo
+ * @property {string} [id]
+ * @property {string} nombre
+ * @property {string} [matricula]
+ * @property {boolean} [papelera]
+ */
+
+/**
+ * Una asignación del cuadrante: una cuadrilla, en una franja, con un destino.
+ * Vive en `cuadrantes/{id}`. UN DOCUMENTO POR ASIGNACIÓN, no uno por día.
+ *
+ * `operarioEmails` duplica los correos que ya están en `operarios`. Es redundante a
+ * propósito: las reglas de Firestore no saben recorrer un array de objetos, y ese array
+ * plano es lo único que permite que un operario liste su asignación sin ver las demás.
+ *
+ * @typedef {Object} Cuadrante
+ * @property {string} [id]
+ * @property {string} fecha `YYYY-MM-DD`
+ * @property {string} horaInicio `HH:MM`, libre (D6)
+ * @property {string} horaFin `HH:MM`
+ * @property {string} cuadrillaId
+ * @property {string} cuadrillaNombre denormalizado
+ * @property {Array<{trabajadorId: string|null, nombre: string, email: string}>} operarios
+ * @property {string[]} operarioEmails el filtro de las reglas
+ * @property {string|null} vehiculoId
+ * @property {string|null} vehiculoNombre denormalizado
+ * @property {'obra'|'taller'} destinoTipo
+ * @property {string|null} obraId null si el destino es el taller
+ * @property {string|null} obraNombre denormalizado
+ * @property {'planificado'|'parte_enviado'} estado
+ * @property {string|null} parteId se rellena cuando el operario envía su parte
+ * @property {string} creadoPor
+ * @property {number} creadoEn
+ */
+
 export {};

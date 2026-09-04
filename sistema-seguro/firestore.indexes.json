@@ -1,0 +1,59 @@
+{
+  "//": [
+    "Índices compuestos. Se despliegan con:",
+    "  firebase deploy --only firestore:indexes",
+    "",
+    "SE DESPLIEGAN ANTES QUE LAS REGLAS Y QUE LA INTERFAZ. Una consulta sin su índice",
+    "no devuelve menos resultados: falla entera, y la pantalla se queda en blanco en",
+    "producción. Construir un índice tarda minutos, así que va primero y por separado.",
+    "",
+    "Firestore crea solo los de un campo. Aquí solo van los que combinan varios."
+  ],
+
+  "indexes": [
+    {
+      "//": [
+        "La vista del operario: 'mi asignación de hoy'.",
+        "  where('operarioEmails','array-contains', miCorreo)",
+        "  where('fecha','==', hoy)",
+        "El filtro por operarioEmails no es opcional: la regla de cuadrantes exige que",
+        "la consulta lo lleve, porque es lo que impide que un operario liste las",
+        "asignaciones de los demás."
+      ],
+      "collectionGroup": "cuadrantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "operarioEmails", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "fecha", "order": "ASCENDING" },
+        { "fieldPath": "horaInicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": [
+        "El tablero de oficina: todas las asignaciones de un día, en orden de hora.",
+        "  where('fecha','==', dia) + orderBy('horaInicio')"
+      ],
+      "collectionGroup": "cuadrantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fecha", "order": "ASCENDING" },
+        { "fieldPath": "horaInicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": [
+        "Historial de una cuadrilla, para detectar solapes al asignar sobre la marcha.",
+        "  where('cuadrillaId','==', id) + where('fecha','==', dia)"
+      ],
+      "collectionGroup": "cuadrantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cuadrillaId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "ASCENDING" },
+        { "fieldPath": "horaInicio", "order": "ASCENDING" }
+      ]
+    }
+  ],
+
+  "fieldOverrides": []
+}

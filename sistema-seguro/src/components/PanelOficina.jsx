@@ -4,7 +4,7 @@ import { db, auth, authSecundario, functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, getDoc, writeBatch, increment, orderBy, limit, startAfter, where } from 'firebase/firestore';
 import { signOut, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth'; 
-import { Building2, FileText, Users, Calculator, Inbox, CheckCircle, Package, FolderOpen, AlertTriangle, Settings, Menu, X, ArrowLeftRight } from 'lucide-react';
+import { Building2, FileText, Users, Calculator, Inbox, CheckCircle, Package, FolderOpen, AlertTriangle, Settings, Menu, X, ArrowLeftRight, CalendarRange } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -30,6 +30,9 @@ import GeneradorCertificaciones from './oficina/GeneradorCertificaciones';
 import EmisionFacturas from './oficina/EmisionFacturas';
 import PresupuestosOfertas from './oficina/PresupuestosOfertas';
 import PapeleraReciclaje from './oficina/PapeleraReciclaje';
+import GestionCuadrillas from './oficina/GestionCuadrillas';
+import GestionVehiculos from './oficina/GestionVehiculos';
+import CuadranteDiario from './oficina/CuadranteDiario';
 
 export default function PanelOficina({ cambiarVista }) {
   const TAMANO_PAGINA = 300;
@@ -40,6 +43,14 @@ export default function PanelOficina({ cambiarVista }) {
   const [partes, setPartes] = useState([]);
   const [obrasList, setObrasList] = useState([]);
   const [materialesList, setMaterialesList] = useState([]);
+
+  // --- Planificación (F1 y F2). Se carga aparte de cargarDatos(): solo hace falta
+  // cuando se abre la categoría, y así la carga inicial del panel no paga por ello.
+  const [cuadrillasList, setCuadrillasList] = useState([]);
+  const [vehiculosList, setVehiculosList] = useState([]);
+  const [cuadranteFecha, setCuadranteFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [asignaciones, setAsignaciones] = useState([]);
+  const [guardandoAsignacion, setGuardandoAsignacion] = useState(false);
   const [trabajadoresList, setTrabajadoresList] = useState([]);
   const [certificacionesList, setCertificacionesList] = useState([]);
   const [facturasList, setFacturasList] = useState([]);
@@ -147,6 +158,96 @@ export default function PanelOficina({ cambiarVista }) {
       setObrasList(frescas);
       setObraActiva(prev => (prev ? frescas.find(o => o.id === prev.id) || prev : null));
   };
+  // ------------------------------------------------------------ planificación
+
+  const refrescarCatalogosPlanificacion = useCallback(async () => {
+      const [snapCuadrillas, snapVehiculos] = await Promise.all([
+          getDocs(collection(db, 'cuadrillas')),
+          getDocs(collection(db, 'vehiculos'))
+      ]);
+      setCuadrillasList(mapear(snapCuadrillas).filter(c => !c.papelera));
+      setVehiculosList(mapear(snapVehiculos).filter(v => !v.papelera));
+  }, []);
+
+  /**
+   * Asignaciones de un día. Se consulta por igualdad de `fecha` y se ordena por hora:
+   * ese par exige el índice compuesto de firestore.indexes.json, que se despliega
+   * ANTES que esta pantalla.
+   */
+  const refrescarAsignaciones = useCallback(async (dia) => {
+      const snap = await getDocs(query(
+          collection(db, 'cuadrantes'),
+          where('fecha', '==', dia),
+          orderBy('horaInicio')
+      ));
+      setAsignaciones(mapear(snap));
+  }, []);
+
+  const crearCuadrilla = async (nombre) => {
+      await addDoc(collection(db, 'cuadrillas'), { nombre, operarios: [], papelera: false });
+      refrescarCatalogosPlanificacion();
+      mostrarToast('Cuadrilla creada.');
+  };
+
+  const actualizarOperariosCuadrilla = async (id, operarios) => {
+      await updateDoc(doc(db, 'cuadrillas', id), { operarios });
+      actualizarEnLista(setCuadrillasList, id, { operarios });
+  };
+
+  const borrarCuadrilla = (id) => {
+      pedirConfirmacion('Eliminar cuadrilla', 'Las asignaciones ya hechas con esta cuadrilla no se tocan: conservan el nombre que tenían. ¿Proceder?', async () => {
+          await updateDoc(doc(db, 'cuadrillas', id), { papelera: true });
+          quitarDeLista(setCuadrillasList, id);
+          mostrarToast('Cuadrilla eliminada.');
+      });
+  };
+
+  const crearVehiculo = async ({ nombre, matricula }) => {
+      await addDoc(collection(db, 'vehiculos'), { nombre, matricula: matricula || '', papelera: false });
+      refrescarCatalogosPlanificacion();
+      mostrarToast('Vehículo registrado.');
+  };
+
+  const guardarVehiculo = async (id, datos) => {
+      const limpio = { nombre: String(datos.nombre || '').trim(), matricula: String(datos.matricula || '').trim() };
+      if (!limpio.nombre) { mostrarToast('El vehículo necesita un nombre.', 'error'); return; }
+      await updateDoc(doc(db, 'vehiculos', id), limpio);
+      actualizarEnLista(setVehiculosList, id, limpio);
+      mostrarToast('Vehículo guardado.');
+  };
+
+  const borrarVehiculo = (id) => {
+      pedirConfirmacion('Eliminar vehículo', '¿Quitar este vehículo del catálogo?', async () => {
+          await updateDoc(doc(db, 'vehiculos', id), { papelera: true });
+          quitarDeLista(setVehiculosList, id);
+          mostrarToast('Vehículo eliminado.');
+      });
+  };
+
+  const crearAsignacion = async (asignacion) => {
+      setGuardandoAsignacion(true);
+      try {
+          // creadoPor se pone aquí y no en la lógica pura: la lógica no sabe quién ha
+          // iniciado sesión, y no debe saberlo.
+          await addDoc(collection(db, 'cuadrantes'), { ...asignacion, creadoPor: auth.currentUser?.email ?? 'oficina' });
+          await refrescarAsignaciones(asignacion.fecha);
+          mostrarToast('Asignación guardada.');
+      } catch (error) {
+          console.error(error);
+          mostrarToast('No se pudo guardar la asignación: ' + error.message, 'error');
+      } finally {
+          setGuardandoAsignacion(false);
+      }
+  };
+
+  const borrarAsignacion = (id) => {
+      pedirConfirmacion('Quitar asignación', '¿Quitar esta asignación del cuadrante?', async () => {
+          await deleteDoc(doc(db, 'cuadrantes', id));
+          quitarDeLista(setAsignaciones, id);
+          mostrarToast('Asignación quitada.');
+      });
+  };
+
   const refrescarInventario = async () => {
       setMaterialesList(mapear(await getDocs(collection(db, 'inventario'))));
   };
@@ -187,6 +288,19 @@ export default function PanelOficina({ cambiarVista }) {
   }, [mostrarToast]);
 
   useEffect(() => { cargarDatos(); }, [cargarDatos]);
+
+  // Los catálogos de planificación se cargan solo al entrar en la categoría, no en la
+  // carga inicial del panel: son datos que la mayoría de las pestañas no usa.
+  useEffect(() => {
+      if (categoriaActiva !== 'planificacion') return;
+      refrescarCatalogosPlanificacion();
+  }, [categoriaActiva, refrescarCatalogosPlanificacion]);
+
+  // Las asignaciones se recargan al cambiar de día.
+  useEffect(() => {
+      if (categoriaActiva !== 'planificacion') return;
+      refrescarAsignaciones(cuadranteFecha);
+  }, [categoriaActiva, cuadranteFecha, refrescarAsignaciones]);
 
   const cargarMasPartes = async () => {
       if (!ultimoDocPartes) return;
@@ -324,28 +438,40 @@ export default function PanelOficina({ cambiarVista }) {
           const existencias = await Promise.all(
               materialesUsados.map((mat) => getDoc(doc(db, 'inventario', mat.id)))
           );
+          // Habitaciones terminadas: aquí SOLO se calcula. La escritura va abajo, dentro del
+          // mismo lote que el stock, el estado y la validación. Antes esto era un updateDoc
+          // suelto que ya había confirmado cuando el lote todavía podía fallar, así que un
+          // fallo posterior dejaba habitaciones marcadas como terminadas por un parte que
+          // nunca llegó a aprobarse.
+          let obraAMarcar = null;
+          let tareasActualizadas = null;
           if (parteAValidar.tareasRealizadas && parteAValidar.tareasRealizadas.length > 0 && parteAValidar.obra) {
               const obraAsociada = parteAValidar.obraId
                       ? obrasList.find(o => o.id === parteAValidar.obraId)
                       : obrasList.find(o => o.nombre === parteAValidar.obra);
               if (obraAsociada && obraAsociada.tareas) {
                   let huboCambios = false;
-                  const tareasActualizadas = obraAsociada.tareas.map(tarea => {
+                  const tareas = obraAsociada.tareas.map(tarea => {
                       if (tarea.completada) return tarea;
                       const coincide = parteAValidar.tareasRealizadas.some(t => ubicacionCoincideConTarea(tarea, t.ubicacion));
                       if (coincide) { huboCambios = true; return { ...tarea, completada: true }; }
                       return tarea;
                   });
-                  if (huboCambios) { await updateDoc(doc(db, 'obras', obraAsociada.id), { tareas: tareasActualizadas }); }
+                  if (huboCambios) { obraAMarcar = obraAsociada.id; tareasActualizadas = tareas; }
               }
           }
           // Solo horas extra: las normales son base mensual fija y nunca se derivan de un parte.
           const { cuadrilla: cuadrillaNumerica, horasExtraAsignadas } = normalizarCuadrilla(cuadrilla);
           // Campos nuevos: no se pisa ninguno de los que escribe el operario.
           const fechaValidacion = new Date().toLocaleDateString();
-          // El parte y su validación se escriben en el mismo lote: nunca puede quedar
-          // un parte aprobado sin su documento en validaciones/.
+          // LAS CUATRO ESCRITURAS VAN EN EL MISMO LOTE: habitaciones terminadas, descuento
+          // de stock, estado del parte y documento de validación. O se confirman las cuatro
+          // o no se confirma ninguna. Nunca puede quedar un parte aprobado sin validación,
+          // ni una habitación marcada por un parte que no llegó a aprobarse.
           const lote = writeBatch(db);
+          if (obraAMarcar && tareasActualizadas) {
+              lote.update(doc(db, 'obras', obraAMarcar), { tareas: tareasActualizadas });
+          }
           materialesUsados.forEach((mat, indice) => {
               if (!existencias[indice].exists()) return;
               lote.update(doc(db, 'inventario', mat.id), { stock: increment(-(Number(mat.cantidad) || 0)) });
@@ -565,6 +691,7 @@ export default function PanelOficina({ cambiarVista }) {
       </div>
 
       <div className="desktop-menu" style={{ borderBottom: `1px solid ${color.linea}`, paddingBottom: '10px', marginBottom: '25px' }}>
+          <button onClick={() => navegar('planificacion', 'cuadrante')} style={catActivaStyle(categoriaActiva === 'planificacion')}><CalendarRange size={16} /> Planificación</button>
           <button onClick={() => navegar('validacion', 'bandeja')} style={catActivaStyle(categoriaActiva === 'validacion')}><Inbox size={16} /> Validación</button>
           <button onClick={() => navegar('proyectos', 'obras')} style={catActivaStyle(categoriaActiva === 'proyectos')}><Building2 size={16} /> Proyectos</button>
           <button onClick={() => navegar('documentos', 'partes')} style={catActivaStyle(categoriaActiva === 'documentos')}><FolderOpen size={16} /> Docs y Facturas</button>
@@ -575,6 +702,7 @@ export default function PanelOficina({ cambiarVista }) {
       </div>
 
       <div className={`mobile-dropdown ${menuMovilAbierto ? 'open' : ''}`}>
+          <button onClick={() => navegar('planificacion', 'cuadrante')} style={catActivaStyle(categoriaActiva === 'planificacion')}><CalendarRange size={16} /> Planificación</button>
           <button onClick={() => navegar('validacion', 'bandeja')} style={catActivaStyle(categoriaActiva === 'validacion')}><Inbox size={16} /> Validación</button>
           <button onClick={() => navegar('proyectos', 'obras')} style={catActivaStyle(categoriaActiva === 'proyectos')}><Building2 size={16} /> Proyectos</button>
           <button onClick={() => navegar('documentos', 'partes')} style={catActivaStyle(categoriaActiva === 'documentos')}><FolderOpen size={16} /> Docs y Facturación</button>
@@ -587,12 +715,16 @@ export default function PanelOficina({ cambiarVista }) {
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '30px', paddingLeft: '10px', flexWrap: 'wrap' }}>
+          {categoriaActiva === 'planificacion' && ( <><button onClick={()=>setPestañaActiva('cuadrante')} style={subMenuBtnStyle(pestañaActiva === 'cuadrante')}>Cuadrante</button><button onClick={()=>setPestañaActiva('cuadrillas')} style={subMenuBtnStyle(pestañaActiva === 'cuadrillas')}>Cuadrillas</button><button onClick={()=>setPestañaActiva('vehiculos')} style={subMenuBtnStyle(pestañaActiva === 'vehiculos')}>Vehículos</button></> )}
           {categoriaActiva === 'proyectos' && ( <><button onClick={()=>setPestañaActiva('obras')} style={subMenuBtnStyle(pestañaActiva === 'obras')}>Gestión de Hoteles / Obras</button><button onClick={()=>setPestañaActiva('resumen')} style={subMenuBtnStyle(pestañaActiva === 'resumen')}>Métricas y Dashboard</button></> )}
           {categoriaActiva === 'documentos' && ( <><button onClick={()=>setPestañaActiva('partes')} style={subMenuBtnStyle(pestañaActiva === 'partes')}>Albaranes Históricos</button><button onClick={()=>setPestañaActiva('certificaciones')} style={subMenuBtnStyle(pestañaActiva === 'certificaciones')}>Certificaciones Mensuales</button><button onClick={()=>setPestañaActiva('facturacion')} style={subMenuBtnStyle(pestañaActiva === 'facturacion')}>Generar Factura</button></> )}
           {categoriaActiva === 'personal' && ( <><button onClick={()=>setPestañaActiva('trabajadores')} style={subMenuBtnStyle(pestañaActiva === 'trabajadores')}>Plantilla Activa</button><button onClick={()=>setPestañaActiva('horas')} style={subMenuBtnStyle(pestañaActiva === 'horas')}>Control de Nóminas</button></> )}
           {categoriaActiva === 'sistema' && ( <><button onClick={()=>setPestañaActiva('papelera')} style={subMenuBtnStyle(pestañaActiva === 'papelera')}>Papelera de Reciclaje</button></> )}
       </div>
 
+      {pestañaActiva === 'cuadrante' && ( <CuadranteDiario blockStyle={blockStyle} fecha={cuadranteFecha} setFecha={setCuadranteFecha} asignaciones={asignaciones} cuadrillasList={cuadrillasList} vehiculosList={vehiculosList} obrasActivas={obrasActivas} crearAsignacion={crearAsignacion} borrarAsignacion={borrarAsignacion} guardando={guardandoAsignacion} /> )}
+      {pestañaActiva === 'cuadrillas' && ( <GestionCuadrillas blockStyle={blockStyle} cuadrillasList={cuadrillasList} trabajadoresActivos={trabajadoresActivos} crearCuadrilla={crearCuadrilla} actualizarOperariosCuadrilla={actualizarOperariosCuadrilla} borrarCuadrilla={borrarCuadrilla} /> )}
+      {pestañaActiva === 'vehiculos' && ( <GestionVehiculos blockStyle={blockStyle} vehiculosList={vehiculosList} crearVehiculo={crearVehiculo} guardarVehiculo={guardarVehiculo} borrarVehiculo={borrarVehiculo} /> )}
       {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} /> )}
       {pestañaActiva === 'resumen' && ( <ResumenMetricas partesDeHoy={partesDeHoy} totalHorasHoy={totalHorasHoy} trabajadoresHoy={trabajadoresHoy} porcentajeGlobal={porcentajeGlobal} /> )}
       {pestañaActiva === 'obras' && ( <GestionProyectos blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevaObra={nuevaObra} setNuevaObra={setNuevaObra} numPlantas={numPlantas} setNumPlantas={setNumPlantas} configHabitaciones={configHabitaciones} setConfigHabitaciones={setConfigHabitaciones} generarHotelInteligente={generarHotelInteligente} obrasList={obrasActivas} obraActiva={obraActiva} setObraActiva={setObraActiva} borrarObra={borrarObra} obtenerEstadisticasHotel={obtenerEstadisticasHotel} marcarTareaHotel={marcarTareaHotel} /> )}

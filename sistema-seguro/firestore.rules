@@ -235,6 +235,62 @@ service cloud.firestore {
       allow list, write: if false;
     }
 
+    // ============================================== PLANIFICACIÓN (bloque nuevo)
+    //
+    // Todo lo que sigue es ADITIVO: no cambia ni una cláusula de lo ya desplegado.
+    // Hacen falta reglas explícitas porque el match final deniega todo por defecto.
+
+    // --------------------------------------------------- catálogos de recursos
+    // Mismo patrón exacto que obras/ e inventario/: los lee cualquiera que haya
+    // entrado —el operario necesita ver el nombre de su cuadrilla y su furgoneta—
+    // y solo la oficina los mantiene.
+
+    match /cuadrillas/{cuadrillaId} {
+      allow get, list: if autenticado();
+      allow create, update, delete: if esAdmin();
+    }
+
+    match /vehiculos/{vehiculoId} {
+      allow get, list: if autenticado();
+      allow create, update, delete: if esAdmin();
+    }
+
+    // ------------------------------------------------------ cuadrantes diarios
+    //
+    // El operario ve SU asignación y ninguna más. Las reglas no saben recorrer un
+    // array de objetos, así que la comprobación se hace contra `operarioEmails`,
+    // un array plano de cadenas que el cliente escribe junto a `operarios`.
+    //
+    // Se identifica por correo, y no por uid, para no inventar un criterio nuevo:
+    // es el mismo que usa `esSuyo()` en partes_de_trabajo.
+    //
+    // ⚠️ `list` con esta condición obliga a que la consulta filtre por
+    // operarioEmails: una consulta sin ese filtro no devuelve menos resultados,
+    // FALLA ENTERA. La vista del operario consulta siempre con array-contains, y
+    // el índice compuesto correspondiente está en firestore.indexes.json.
+
+    match /cuadrantes/{asignacionId} {
+
+      function esSuya() {
+        return autenticado()
+               && correo() != ''
+               && correo() in resource.data.operarioEmails;
+      }
+
+      allow get, list: if esAdmin() || esSuya();
+
+      // Solo oficina planifica. El operario nunca escribe aquí: cuando envíe su
+      // parte será la oficina, o una función, quien marque la asignación.
+      allow create: if esAdmin()
+                    && request.resource.data.operarioEmails is list
+                    && request.resource.data.operarioEmails.size() > 0
+                    && request.resource.data.fecha is string
+                    && request.resource.data.destinoTipo in ['obra', 'taller'];
+
+      allow update: if esAdmin();
+      allow delete: if esAdmin();
+    }
+
     // ------------------------------------------------------- denegación por defecto
 
     match /{document=**} {
