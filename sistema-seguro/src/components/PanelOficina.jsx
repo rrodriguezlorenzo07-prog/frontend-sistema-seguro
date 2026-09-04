@@ -51,6 +51,11 @@ export default function PanelOficina({ cambiarVista }) {
   const [cuadranteFecha, setCuadranteFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [asignaciones, setAsignaciones] = useState([]);
   const [guardandoAsignacion, setGuardandoAsignacion] = useState(false);
+
+  // --- Unidades de obra propuestas por el operario en el parte que se está validando
+  // (Pieza 3, D7). Se cargan al abrir el parte, no en la carga general del panel.
+  const [unidadesPropuestas, setUnidadesPropuestas] = useState([]);
+  const [unidadesAConfirmar, setUnidadesAConfirmar] = useState([]);
   const [trabajadoresList, setTrabajadoresList] = useState([]);
   const [certificacionesList, setCertificacionesList] = useState([]);
   const [facturasList, setFacturasList] = useState([]);
@@ -362,7 +367,33 @@ export default function PanelOficina({ cambiarVista }) {
   const partesHistorial = partesActivos.filter(p => p.estado === 'aprobado');
 
 
-  const abrirValidacion = (parte) => { setParteAValidar(parte); setCuadrilla(cuadrillaInicial(parte, trabajadoresList)); };
+  const cargarUnidadesDelParte = async (parteId) => {
+      try {
+          const snap = await getDocs(query(
+              collection(db, 'unidades_obra'),
+              where('parteId', '==', parteId),
+              orderBy('orden')
+          ));
+          // Solo las que siguen sin confirmar: las ya confirmadas no se vuelven a ofrecer.
+          const propuestas = mapear(snap).filter((u) => u.estado === 'propuesta');
+          setUnidadesPropuestas(propuestas);
+          // Vienen todas premarcadas: lo normal es que el operario acierte, y así la
+          // oficina desmarca la excepción en vez de marcar la norma.
+          setUnidadesAConfirmar(propuestas.map((u) => u.id));
+      } catch (error) {
+          console.error('No se pudieron cargar las unidades propuestas:', error);
+          setUnidadesPropuestas([]);
+          setUnidadesAConfirmar([]);
+      }
+  };
+
+  const alternarUnidad = (id) => setUnidadesAConfirmar((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+
+  const alternarTodasLasUnidades = () => setUnidadesAConfirmar((prev) =>
+      prev.length === unidadesPropuestas.length ? [] : unidadesPropuestas.map((u) => u.id));
+
+  const abrirValidacion = (parte) => { cargarUnidadesDelParte(parte.id); setParteAValidar(parte); setCuadrilla(cuadrillaInicial(parte, trabajadoresList)); };
   // nuevoOperario es ahora el id del trabajador, no su nombre. El nombre se guarda
   // igualmente: es el registro histórico del albarán.
   const agregarOperarioCuadrilla = () => {
@@ -476,6 +507,17 @@ export default function PanelOficina({ cambiarVista }) {
               if (!existencias[indice].exists()) return;
               lote.update(doc(db, 'inventario', mat.id), { stock: increment(-(Number(mat.cantidad) || 0)) });
           });
+          // Las unidades confirmadas entran EN EL MISMO LOTE que el resto de la
+          // aprobación: una unidad no puede quedar confirmada por un parte que no se
+          // llegó a aprobar, porque confirmar es lo que habilitará certificarla.
+          const correoOficina = auth.currentUser?.email ?? 'oficina';
+          for (const unidadId of unidadesAConfirmar) {
+              lote.update(doc(db, 'unidades_obra', unidadId), {
+                  estado: 'confirmada',
+                  confirmadaPor: correoOficina,
+                  confirmadaEn: Date.now()
+              });
+          }
           lote.update(doc(db, 'partes_de_trabajo', parteAValidar.id), { estado: 'aprobado', fechaValidacion, certificado: false, facturado: false, papelera: false });
           lote.set(doc(db, 'validaciones', parteAValidar.id), {
               cuadrilla: cuadrillaNumerica,
@@ -486,7 +528,9 @@ export default function PanelOficina({ cambiarVista }) {
               fechaValidacion
           }, { merge: true });
           await lote.commit();
-          setParteAValidar(null); setCuadrilla([]); cargarDatos(); mostrarToast("Albarán validado y guardado.");
+          setParteAValidar(null); setCuadrilla([]);
+          setUnidadesPropuestas([]); setUnidadesAConfirmar([]);
+          cargarDatos(); mostrarToast("Albarán validado y guardado.");
       } catch (error) {
           console.error(error); mostrarToast("Error al validar el parte: " + error.message, "error");
       } finally {
@@ -725,7 +769,7 @@ export default function PanelOficina({ cambiarVista }) {
       {pestañaActiva === 'cuadrante' && ( <CuadranteDiario blockStyle={blockStyle} fecha={cuadranteFecha} setFecha={setCuadranteFecha} asignaciones={asignaciones} cuadrillasList={cuadrillasList} vehiculosList={vehiculosList} obrasActivas={obrasActivas} crearAsignacion={crearAsignacion} borrarAsignacion={borrarAsignacion} guardando={guardandoAsignacion} /> )}
       {pestañaActiva === 'cuadrillas' && ( <GestionCuadrillas blockStyle={blockStyle} cuadrillasList={cuadrillasList} trabajadoresActivos={trabajadoresActivos} crearCuadrilla={crearCuadrilla} actualizarOperariosCuadrilla={actualizarOperariosCuadrilla} borrarCuadrilla={borrarCuadrilla} /> )}
       {pestañaActiva === 'vehiculos' && ( <GestionVehiculos blockStyle={blockStyle} vehiculosList={vehiculosList} crearVehiculo={crearVehiculo} guardarVehiculo={guardarVehiculo} borrarVehiculo={borrarVehiculo} /> )}
-      {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} /> )}
+      {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} unidadesPropuestas={unidadesPropuestas} unidadesAConfirmar={unidadesAConfirmar} alternarUnidad={alternarUnidad} alternarTodasLasUnidades={alternarTodasLasUnidades} /> )}
       {pestañaActiva === 'resumen' && ( <ResumenMetricas partesDeHoy={partesDeHoy} totalHorasHoy={totalHorasHoy} trabajadoresHoy={trabajadoresHoy} porcentajeGlobal={porcentajeGlobal} /> )}
       {pestañaActiva === 'obras' && ( <GestionProyectos blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevaObra={nuevaObra} setNuevaObra={setNuevaObra} numPlantas={numPlantas} setNumPlantas={setNumPlantas} configHabitaciones={configHabitaciones} setConfigHabitaciones={setConfigHabitaciones} generarHotelInteligente={generarHotelInteligente} obrasList={obrasActivas} obraActiva={obraActiva} setObraActiva={setObraActiva} borrarObra={borrarObra} obtenerEstadisticasHotel={obtenerEstadisticasHotel} marcarTareaHotel={marcarTareaHotel} /> )}
       {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarRolTrabajador={cambiarRolTrabajador} cambiandoRolId={cambiandoRolId} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} /> )}

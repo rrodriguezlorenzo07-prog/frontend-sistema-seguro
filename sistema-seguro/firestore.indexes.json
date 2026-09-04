@@ -9,7 +9,6 @@
     "",
     "Firestore crea solo los de un campo. Aquí solo van los que combinan varios."
   ],
-
   "indexes": [
     {
       "//": [
@@ -23,9 +22,18 @@
       "collectionGroup": "cuadrantes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "operarioEmails", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "fecha", "order": "ASCENDING" },
-        { "fieldPath": "horaInicio", "order": "ASCENDING" }
+        {
+          "fieldPath": "operarioEmails",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "fecha",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "horaInicio",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
@@ -36,8 +44,14 @@
       "collectionGroup": "cuadrantes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "fecha", "order": "ASCENDING" },
-        { "fieldPath": "horaInicio", "order": "ASCENDING" }
+        {
+          "fieldPath": "fecha",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "horaInicio",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
@@ -48,12 +62,57 @@
       "collectionGroup": "cuadrantes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "cuadrillaId", "order": "ASCENDING" },
-        { "fieldPath": "fecha", "order": "ASCENDING" },
-        { "fieldPath": "horaInicio", "order": "ASCENDING" }
+        {
+          "fieldPath": "cuadrillaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fecha",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "horaInicio",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": [
+        "Unidades propuestas pendientes de confirmar, para la bandeja de validación.",
+        "  where('parteId','==', id) + orderBy('orden')",
+        "Es la consulta que hace BandejaValidacion al abrir un parte."
+      ],
+      "collectionGroup": "unidades_obra",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "parteId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "orden",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": [
+        "El mapa de avance de una obra.",
+        "  where('obraId','==', id) + orderBy('orden')"
+      ],
+      "collectionGroup": "unidades_obra",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "obraId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "orden",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
-
   "fieldOverrides": []
 }

@@ -6,6 +6,7 @@ import { db } from '../../firebase';
 import { horasTotalesDocumento } from '../../utils/horasDocumento';
 import { color } from '../../estilos/tokens';
 import Insignia from '../../ui/Insignia';
+import { cantidadDeLinea } from '../../logica/unidades';
 import Modal from '../../ui/Modal';
 import Boton from '../../ui/Boton';
 import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
@@ -79,7 +80,22 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
           itemsAValorar.push({ idKey: `${alb.id}-H`, concepto: `[Mano de Obra] ${equipo}`, cantidad: horas, fecha: alb.fecha });
       }
       (alb.tareasRealizadas || []).forEach((t, i) => {
-          itemsAValorar.push({ idKey: `${alb.id}-T-${i}`, concepto: `[${t.ubicacion}] ${t.descripcion}`, cantidad: 1, fecha: alb.fecha });
+          // CANTIDAD REAL, no 1 fijo. Una línea que dice "Habitaciones 100-110" son
+          // once unidades, y hasta ahora se facturaba como una: el cliente pagaba
+          // una puerta donde se habían puesto once.
+          //
+          // Cuando el texto no permite contar con confianza se sigue poniendo 1, igual
+          // que antes —nunca se inventa un número—, pero se marca para que oficina lo
+          // mire antes de emitir.
+          const leido = cantidadDeLinea(t.ubicacion);
+          itemsAValorar.push({
+              idKey: `${alb.id}-T-${i}`,
+              concepto: `[${t.ubicacion}] ${t.descripcion}`,
+              cantidad: leido.cantidad,
+              revisar: leido.revisar,
+              detalleCantidad: leido.detalle,
+              fecha: alb.fecha
+          });
       });
       (alb.materialesUsados || []).forEach((m, i) => {
            itemsAValorar.push({ idKey: `${alb.id}-M-${i}`, concepto: `[Material] ${m.nombre}`, cantidad: Number(m.cantidad) || 1, fecha: alb.fecha });
@@ -398,6 +414,11 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
                               <div style={{ marginTop: '30px', borderTop: `2px solid ${color.petroleo}`, paddingTop: '20px' }}>
                                   <h4 style={{ margin: '0 0 5px 0', fontSize: '13px', letterSpacing: '1px', textTransform: 'uppercase' }}>Paso 2: Valorar Tareas y Horas (Opcional)</h4>
                                   <p style={{ margin: '0 0 15px 0', fontSize: '11px', color: color.textoSuave }}>Si dejas los precios en blanco, se generará el PDF clásico de horas. Si escribes un precio, se generará una Certificación Valorada en Euros.</p>
+                                  {itemsAValorar.some(i => i.revisar) && (
+                                      <p style={{ margin: `0 0 15px 0`, padding: '10px 12px', fontSize: '11px', color: color.aviso, backgroundColor: color.avisoSuave, border: `1px solid ${color.aviso}` }}>
+                                          ⚠ Hay {itemsAValorar.filter(i => i.revisar).length} línea(s) cuya cantidad no se ha podido leer del texto y van como 1 unidad. Revísalas antes de emitir.
+                                      </p>
+                                  )}
                                   
                                   <div style={{ border: `1px solid ${color.petroleo}` }}>
                                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
@@ -413,9 +434,16 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
                                               {itemsAValorar.map(item => {
                                                   const precio = parseFloat(preciosAlbaranes[item.idKey]) || 0;
                                                   return (
-                                                      <tr key={item.idKey} style={{ borderBottom: `1px solid ${color.linea}`, backgroundColor: color.superficie }}>
-                                                          <td style={{ padding: '12px' }}>{item.concepto}</td>
-                                                          <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>{item.cantidad}</td>
+                                                      <tr key={item.idKey} style={{ borderBottom: `1px solid ${color.linea}`, backgroundColor: item.revisar ? color.avisoSuave : color.superficie }}>
+                                                          <td style={{ padding: '12px' }}>
+                                                              {item.concepto}
+                                                              {item.detalleCantidad ? (
+                                                                  <span style={{ display: 'block', fontSize: '10px', color: item.revisar ? color.aviso : color.textoTenue, marginTop: '2px' }}>
+                                                                      {item.revisar ? '⚠ ' : ''}{item.detalleCantidad}
+                                                                  </span>
+                                                              ) : null}
+                                                          </td>
+                                                          <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', color: item.revisar ? color.aviso : color.texto }}>{item.cantidad}</td>
                                                           <td style={{ padding: '8px' }}>
                                                               <input type="number" step="0.01" style={{...inputStyle, padding: '8px', fontSize: '12px'}} placeholder="Dejar vacío = 0€" value={preciosAlbaranes[item.idKey] || ''} onChange={(e) => setPreciosAlbaranes({...preciosAlbaranes, [item.idKey]: e.target.value})} />
                                                           </td>

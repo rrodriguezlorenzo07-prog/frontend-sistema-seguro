@@ -1,7 +1,7 @@
 // @ts-check
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
-import { collection, getDocs, query, where, orderBy, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, setDoc, writeBatch } from 'firebase/firestore';
 import { ref, uploadString } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin, Clock, Truck, Wrench, Users, AlertTriangle, ArrowLeft } from 'lucide-react';
@@ -12,6 +12,7 @@ import Insignia from '../ui/Insignia';
 import Tarjeta from '../ui/Tarjeta';
 import Etiqueta from '../ui/Etiqueta';
 import { destinoDeAsignacion, normalizarHorasReportadas, contrasteDeJornada, ordenarPorHora } from '../logica/cuadrantes';
+import { previsualizarPropuesta, unidadesDesdeLinea } from '../logica/unidades';
 
 export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   // --- Asignación del cuadrante (Pieza 2) ---
@@ -245,6 +246,34 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
     const referencia = doc(collection(db, 'partes_de_trabajo'));
     const confirmacionDelServidor = setDoc(referencia, payloadParte);
 
+    // PROPUESTA DE UNIDADES DE OBRA (Pieza 3, D7).
+    //
+    // Sale del mismo texto que el operario ya escribió en cada ubicación: un rango de
+    // once habitaciones genera once documentos, uno por unidad, para que la oficina
+    // pueda confirmar ocho y dejar tres pendientes.
+    //
+    // Va en su propio lote y NO se espera, igual que el parte: si falla, el parte ya
+    // está guardado y no se pierde el trabajo. Una propuesta sin confirmar no vale
+    // dinero, así que no merece bloquear al operario delante de la pantalla.
+    const unidadesPropuestas = tareasRealizadas.flatMap((t) => unidadesDesdeLinea({
+        obraId: payloadParte.obraId,
+        obraNombre: nombreFinalObra,
+        parteId: referencia.id,
+        ubicacion: t.ubicacion,
+        descripcion: t.descripcion,
+        propuestaPor: usuario.email
+    }));
+
+    if (unidadesPropuestas.length > 0) {
+        const loteUnidades = writeBatch(db);
+        for (const unidad of unidadesPropuestas) {
+            loteUnidades.set(doc(collection(db, 'unidades_obra')), unidad);
+        }
+        loteUnidades.commit().catch((error) => {
+            console.error('El parte se guardó, pero las unidades propuestas no:', error);
+        });
+    }
+
     const envio = envioRef.current + 1;
     envioRef.current = envio;
 
@@ -284,6 +313,12 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         setMensaje({ texto: '', tipo: '' });
     }, 4000);
   };
+
+  // Lo que se ha entendido de la ubicación mientras se teclea. Derivado, no estado.
+  // NO SE PIDE NADA NUEVO al operario: el rango ya lo escribe aquí, así que la
+  // propuesta de unidades sale del mismo texto. Cualquier campo extra sería más
+  // lento que lo que ya hace, y se abandonaría.
+  const propuesta = previsualizarPropuesta(tareaUbicacion);
 
   // Aviso derivado, no estado: se recalcula solo al teclear.
   const { aviso: avisoJornada } = contrasteDeJornada(horasTaller, horasCalle);
@@ -395,6 +430,11 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
                   <input type="text" placeholder="Ej: Habitación 101 o Pasillo 2" value={tareaUbicacion} onChange={(e) => setTareaUbicacion(e.target.value)} style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
+                  {propuesta.valido && (
+                      <p style={{ margin: `-4px 0 0`, fontSize: texto.menor, color: color.vidrio, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <CheckSquare size={13} /> {propuesta.resumen}
+                      </p>
+                  )}
                   <input type="text" placeholder="Ej: Instalación de puerta de paso" value={tareaDescripcion} onChange={(e) => setTareaDescripcion(e.target.value)} style={{ width: '100%', padding: '15px', border: `1px solid ${color.linea}`, outline: 'none', boxSizing: 'border-box', fontSize: '14px' }} />
                   
                   <button type="button" onClick={agregarTareaLista} style={{ padding: '15px', backgroundColor: color.petroleo, color: color.textoSobreOscuro, border: 'none', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '12px', marginTop: '5px' }}>

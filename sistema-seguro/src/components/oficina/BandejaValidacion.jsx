@@ -1,8 +1,9 @@
 // @ts-check
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Trash2, Package, FileText, Clock, MapPin, Plus, Minus } from 'lucide-react';
+import { CheckCircle, Trash2, Package, FileText, Clock, MapPin, Plus, Minus, Layers, Check } from 'lucide-react';
 import { resolverFirmasDe } from '../../utils/firmas';
-import { color } from '../../estilos/tokens';
+import { color, texto, peso, interletra, espacio, radio } from '../../estilos/tokens';
+import Insignia from '../../ui/Insignia';
 
 export default function BandejaValidacion({
     partesPendientes,
@@ -20,7 +21,12 @@ export default function BandejaValidacion({
     validandoParte,
     borrarParte,
     abrirValidacion,
-    btnBlackStyle
+    btnBlackStyle,
+    // Unidades de obra propuestas por el operario en este parte (Pieza 3, D7).
+    unidadesPropuestas = [],
+    unidadesAConfirmar = [],
+    alternarUnidad,
+    alternarTodasLasUnidades
 }) {
   // Las firmas se guardan como ruta de Storage. Se resuelven una vez al montar
   // y se cachean en estado: así no se repite la descarga en cada render.
@@ -166,6 +172,59 @@ export default function BandejaValidacion({
                                         </div>
                                     ))}
                                 </div>
+
+                                {/* UNIDADES DE OBRA PROPUESTAS (Pieza 3, D7).
+                                    El operario propone desde el texto que ya escribía;
+                                    aquí la oficina confirma. Solo lo confirmado cuenta:
+                                    una propuesta sin confirmar no habilita facturar. */}
+                                {unidadesPropuestas.length > 0 && (
+                                    <div style={{ marginBottom: espacio.lg }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: espacio.sm, flexWrap: 'wrap', gap: espacio.xs }}>
+                                            <strong style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: texto.menor, letterSpacing: interletra.etiqueta, textTransform: 'uppercase' }}>
+                                                <Layers size={14} /> Unidades propuestas
+                                                <Insignia tono={unidadesAConfirmar.length > 0 ? 'exito' : 'neutra'}>
+                                                    {unidadesAConfirmar.length} de {unidadesPropuestas.length}
+                                                </Insignia>
+                                            </strong>
+                                            <button type="button" onClick={alternarTodasLasUnidades}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: color.vidrio, fontSize: texto.menor, fontWeight: peso.fuerte, fontFamily: 'inherit', padding: 0 }}>
+                                                {unidadesAConfirmar.length === unidadesPropuestas.length ? 'Ninguna' : 'Todas'}
+                                            </button>
+                                        </div>
+
+                                        <p style={{ margin: `0 0 ${espacio.sm}`, fontSize: texto.menor, color: color.textoTenue, lineHeight: 1.45 }}>
+                                            El operario dice haber terminado estas. Confirma solo las que
+                                            estén de verdad acabadas: es lo que habilitará certificarlas.
+                                        </p>
+
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: espacio.xs }}>
+                                            {unidadesPropuestas.map((u) => {
+                                                const elegida = unidadesAConfirmar.includes(u.id);
+                                                return (
+                                                    <button
+                                                        key={u.id}
+                                                        type="button"
+                                                        onClick={() => alternarUnidad(u.id)}
+                                                        title={u.textoOriginal}
+                                                        style={{
+                                                            display: 'flex', alignItems: 'center', gap: '5px',
+                                                            padding: `${espacio.xs} ${espacio.sm}`,
+                                                            border: `1px solid ${elegida ? color.exito : color.linea}`,
+                                                            backgroundColor: elegida ? color.exitoSuave : color.superficie,
+                                                            color: elegida ? color.exito : color.textoSuave,
+                                                            borderRadius: radio.sutil, cursor: 'pointer',
+                                                            fontFamily: 'inherit', fontSize: texto.menor,
+                                                            fontWeight: elegida ? peso.fuerte : peso.normal
+                                                        }}
+                                                    >
+                                                        {elegida ? <Check size={13} /> : null}
+                                                        {u.nombre}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div style={{ display: 'flex', gap: '10px' }}>
                                     <button onClick={confirmarValidacionParte} disabled={validandoParte} style={{ ...btnBlackStyle, opacity: validandoParte ? 0.5 : 1, cursor: validandoParte ? 'not-allowed' : 'pointer' }}>

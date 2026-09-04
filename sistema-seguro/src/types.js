@@ -244,4 +244,31 @@
  * @property {number} creadoEn
  */
 
+// ------------------------------------------------------------- unidades de obra
+
+/**
+ * Una unidad de obra ejecutable y certificable. Vive en `unidades_obra/{id}`.
+ *
+ * NO CONFUNDIR con `Tarea`, que es el array `obras.tareas[]` de siempre. Aquella es
+ * una casilla de progreso dentro del documento de la obra; esta es un documento propio,
+ * con rastro de quién la propuso y quién la confirmó, y es la que podrá facturarse.
+ * Los dos conviven a propósito (D2): el array viejo no se migra por ahora.
+ *
+ * @typedef {Object} UnidadObra
+ * @property {string} [id]
+ * @property {string|null} obraId
+ * @property {string|null} obraNombre denormalizado
+ * @property {string} nombre "Unidad 101", o el texto tal cual si no lleva número
+ * @property {number|null} numero
+ * @property {number} orden para ordenar sin parsear el nombre
+ * @property {string} descripcion lo que se hizo
+ * @property {string} textoOriginal lo que tecleó el operario, sin interpretar
+ * @property {string} parteId de qué parte salió
+ * @property {'propuesta'|'confirmada'} estado
+ * @property {string} propuestaPor correo del operario
+ * @property {number} propuestaEn
+ * @property {string|null} confirmadaPor correo del admin
+ * @property {number|null} confirmadaEn
+ */
+
 export {};

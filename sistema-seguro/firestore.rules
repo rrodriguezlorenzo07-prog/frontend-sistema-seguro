@@ -301,6 +301,51 @@ service cloud.firestore {
       allow delete: if esAdmin();
     }
 
+    // ================================================ UNIDADES DE OBRA (Pieza 3)
+    //
+    // Avance certificable, AISLADO de los partes de RRHH. El operario PROPONE qué
+    // unidad cerró al enviar su parte; la oficina CONFIRMA al validar (D7).
+    //
+    // Una propuesta no vale dinero: hasta que un admin la confirma no habilita nada.
+    // Por eso el operario puede crearlas, pero no confirmarlas ni retocarlas después.
+
+    match /unidades_obra/{unidadId} {
+
+      function esSuyaLaPropuesta() {
+        return autenticado()
+               && resource.data.get('propuestaPor', '').lower() == correo();
+      }
+
+      // Todos leen: el operario necesita ver el avance de su obra, la oficina el mapa.
+      allow get, list: if autenticado();
+
+      // El operario propone. Solo en su nombre, solo como propuesta, y sin poder
+      // rellenar los campos de confirmación.
+      //
+      // NO se comprueba aquí que el parte sea suyo: el parte se escribe sin esperar al
+      // servidor (persistentLocalCache) y puede no existir todavía cuando llega la
+      // unidad. La firma por correo ya impide proponer en nombre de otro, y una
+      // propuesta sin confirmar no produce ningún efecto económico.
+      allow create: if esAdmin() || (
+           autenticado()
+        && request.resource.data.estado == 'propuesta'
+        && request.resource.data.propuestaPor.lower() == correo()
+        && request.resource.data.confirmadaPor == null
+        && request.resource.data.confirmadaEn == null
+      );
+
+      // SOLO LA OFICINA CONFIRMA. Es lo que separa "el operario dice que terminó" de
+      // "la empresa da por terminada la unidad", que es lo único que puede facturarse.
+      allow update: if esAdmin();
+
+      // El operario retira su propia propuesta mientras nadie la haya confirmado:
+      // equivocarse de habitación al teclear no debe requerir llamar a oficina.
+      allow delete: if esAdmin() || (
+           esSuyaLaPropuesta()
+        && resource.data.get('estado', '') == 'propuesta'
+      );
+    }
+
     // ------------------------------------------------------- denegación por defecto
 
     match /{document=**} {
