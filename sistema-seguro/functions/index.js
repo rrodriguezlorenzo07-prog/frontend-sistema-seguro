@@ -7,6 +7,7 @@ const { initializeApp, getApps } = require('firebase-admin/app');
 
 const { cambiarPermisoAdmin } = require('./logica');
 const { trasladarFirmaIncrustada } = require('./firmas');
+const { marcarAsignacionComoEnviada } = require('./cuadrantes');
 
 if (getApps().length === 0) {
     initializeApp();
@@ -64,6 +65,42 @@ exports.subirFirmaPendiente = onDocumentCreated(
             // Un formato que no esperábamos. Se registra, pero no se reintenta: el
             // documento conserva la firma y reintentar daría el mismo resultado.
             console.warn(`Firma no trasladada en ${evento.params.parteId}: ${resultado.motivo}`);
+        }
+    }
+);
+
+/**
+ * Marca la asignación del cuadrante de la que salió un parte.
+ *
+ * DISPARADOR PROPIO Y NO UN AÑADIDO A subirFirmaPendiente, aunque escuchen el mismo
+ * evento: son dos cosas que fallan por separado y deben poder reintentarse por
+ * separado. Si el traslado de la firma falla y comparten función, el reintento volvería
+ * a marcar el cuadrante; y al revés, un cuadrante borrado no debe impedir que la firma
+ * llegue a Storage. Cloud Functions permite varios disparadores sobre el mismo
+ * documento precisamente para esto.
+ *
+ * SIN retry. Marcar el cuadrante es cosmético —hace aparecer una insignia en el
+ * tablero— y el parte ya está guardado pase lo que pase. Reintentar indefinidamente
+ * algo que no cambia el resultado del trabajo no compensa el ruido.
+ */
+exports.marcarCuadranteDelParte = onDocumentCreated(
+    { region: 'us-central1', document: 'partes_de_trabajo/{parteId}' },
+    async (evento) => {
+        const datos = evento.data?.data();
+        if (!datos) return;
+
+        const parteId = evento.params.parteId;
+        try {
+            const resultado = await marcarAsignacionComoEnviada(parteId, datos);
+            if (resultado.marcada) {
+                console.log(`Cuadrante marcado: ${resultado.asignacionId} <- parte ${parteId}`);
+            } else if (resultado.motivo === 'asignacion-inexistente') {
+                console.warn(`El parte ${parteId} apunta a un cuadrante que ya no existe: ${resultado.asignacionId}`);
+            }
+            // 'sin-asignacion' y 'ya-marcada' son normales y no se registran.
+        } catch (error) {
+            // Que el parte esté guardado es lo que importa; la insignia del tablero no.
+            console.error(`No se pudo marcar el cuadrante del parte ${parteId}:`, error);
         }
     }
 );
