@@ -46,6 +46,66 @@ export function horasNormalesDelPeriodo(baseMensual, diasLibres) {
     return Math.max(0, base - dias * HORAS_POR_DIA_LIBRE);
 }
 
+// ============================ MODELO DE DÍAS (esquema 2) ====================
+//
+// El modelo viejo, de arriba, sigue intacto: las liquidaciones ya cerradas con él se
+// leen tal cual y NUNCA se recalculan. Lo de aquí abajo es lo que se aplica de ahora en
+// adelante a quien tenga categoría profesional asignada.
+//
+// El trabajador cobra POR DÍA según su categoría del convenio, no por horas de contrato.
+
+/**
+ * Días trabajables de un mes: SIEMPRE 30.
+ *
+ * No son los días naturales reales del mes. Es la convención de la nómina española
+ * —salario mensual dividido entre 30— y es lo que hace que febrero y marzo paguen igual
+ * con la misma tarifa. Contar los días reales (28, 29, 30 o 31) haría que el sueldo
+ * variase de un mes a otro sin que nadie lo hubiera decidido.
+ *
+ * Va como constante y no como cálculo a propósito: no hay nada que derivar del
+ * calendario, y una función que devolviera `new Date(...).getDate()` invitaría a
+ * "arreglarla" más adelante.
+ */
+export const DIAS_TRABAJABLES_MES = 30;
+
+/**
+ * Días que se pagan: los trabajables menos las ausencias. Nunca negativo.
+ *
+ * @param {number} diasTrabajables
+ * @param {number} diasAusencia
+ * @returns {number}
+ */
+export function diasPagadosDelPeriodo(diasTrabajables, diasAusencia) {
+    const trabajables = Number(diasTrabajables) || 0;
+    const ausencias = Number(diasAusencia) || 0;
+    return Math.max(0, trabajables - ausencias);
+}
+
+/**
+ * El importe base del periodo: días pagados por la tarifa diaria de su categoría.
+ *
+ * @param {number} diasPagados
+ * @param {number} tarifaDiaria
+ * @returns {number}
+ */
+export function importeBaseDelPeriodo(diasPagados, tarifaDiaria) {
+    return (Number(diasPagados) || 0) * (Number(tarifaDiaria) || 0);
+}
+
+/**
+ * ¿Tiene este trabajador una categoría asignada?
+ *
+ * Sin ella no hay tarifa diaria, y sin tarifa no hay nómina que calcular. NO se aplica
+ * ningún valor por defecto: pagar 0 € a alguien porque falta rellenar un campo sería un
+ * error caro y silencioso, así que el cierre se bloquea y se dice a quién le falta.
+ *
+ * @param {{categoriaId?: string|null}} trabajador
+ * @returns {boolean}
+ */
+export function tieneCategoria(trabajador) {
+    return typeof trabajador?.categoriaId === 'string' && trabajador.categoriaId !== '';
+}
+
 /** La clave con la que se identifica a un trabajador: su id, o su nombre si no lo tiene. */
 export const claveDeTrabajador = (trab) => trab?.id || trab?.nombre || '';
 

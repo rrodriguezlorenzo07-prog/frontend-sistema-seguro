@@ -3,11 +3,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { FileSpreadsheet, Euro, User, CalendarOff, RotateCcw, PencilLine, Lock, Archive, AlertTriangle } from 'lucide-react';
 import { db, auth } from '../../firebase';
 import { collection, query, where, getDocs, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { HORAS_BASE_POR_DEFECTO, baseMensualDe, tieneBaseConfigurada, horasNormalesDelPeriodo, plantillaDelPeriodo, claveDeTrabajador } from '../../utils/nomina';
+import { DIAS_TRABAJABLES_MES, diasPagadosDelPeriodo, importeBaseDelPeriodo, tieneCategoria, plantillaDelPeriodo, claveDeTrabajador } from '../../utils/nomina';
 import { agregarHorasExtraDelPeriodo } from '../../utils/horasPeriodo';
+import { contarPorTrabajador } from '../../logica/ausencias';
+import { categoriaDe } from '../../logica/categorias';
 import {
     esPeriodoValido, idDePeriodo, limitesDelMes, esPeriodoPasado,
-    nombreDelPeriodo, idDeCierre, siguienteVersion, cierreVigente
+    nombreDelPeriodo, idDeCierre, siguienteVersion, cierreVigente,
+    primerDiaISO, ultimoDiaISO
 } from '../../utils/periodos';
 import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV } from '../../utils/csv';
 import { color, espacio } from '../../estilos/tokens';
@@ -20,22 +23,40 @@ const claveDe = claveDeTrabajador;
 /** Un id de documento no puede llevar barras. Solo afecta a fichas sin id. */
 const idDeLinea = (clave) => String(clave).replace(/\//g, '_');
 
-const CABECERAS_CSV = ['Trabajador', 'Base Mensual (h)', 'Origen de la Base', 'Días de Ausencia',
+// DOS JUEGOS DE CABECERAS, uno por esquema, y NUNCA el mismo para los dos.
+//
+// Exportar un cierre viejo con las cabeceras nuevas daría un Excel con las columnas
+// mal etiquetadas y los números correctos, que es la peor combinación posible: nadie
+// lo nota. Se elige según el esquema de LO QUE SE EXPORTA, no según el modelo de hoy.
+const CABECERAS_ESQUEMA_1 = ['Trabajador', 'Base Mensual (h)', 'Origen de la Base', 'Días de Ausencia',
     'Horas Normales', 'H. Normales Calculadas', 'Ajuste Manual Normales',
     'Horas Extras', 'H. Extras de Albaranes', 'Ajuste Manual Extras',
     'Tarifa Normal (€)', 'Tarifa Extra (€)', 'Total Pagar (€)'];
 
-export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, inputStyle, pagoHoraNormal, setPagoHoraNormal, pagoHoraExtra, setPagoHoraExtra, trabajadoresList, trabajadoresTodos, pedirConfirmacion, mostrarToast }) {
+const CABECERAS_ESQUEMA_2 = ['Trabajador', 'Categoría', 'Tarifa Diaria (€)',
+    'Días Trabajables', 'Días de Ausencia', 'Días Pagados', 'Importe Base (€)',
+    'Horas Extras', 'H. Extras de Albaranes', 'Ajuste Manual Extras',
+    'Tarifa Hora Extra (€)', 'Importe Horas Extra (€)', 'Total Pagar (€)'];
+
+/** Un cierre sin el campo es de antes de que existiera: esquema 1. */
+const esquemaDe = (cierre) => Number(cierre?.esquema) === 2 ? 2 : 1;
+
+export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, inputStyle, categoriasList, trabajadoresList, trabajadoresTodos, pedirConfirmacion, mostrarToast }) {
 
   // Un periodo es un mes natural. El selector es de mes, no de rango: las reglas de
   // Firestore rechazan cualquier otra cosa, así que dejar elegir un rango libre solo
   // serviría para que el cierre fallara de forma incomprensible.
   const [periodo, setPeriodo] = useState(() => idDePeriodo());
 
-  const [diasAusencia, setDiasAusencia] = useState({});
-  const [horasManuales, setHorasManuales] = useState({});
+  // Los días de ausencia YA NO SE TECLEAN: se cuentan desde la colección `ausencias`.
+  // Antes eran un número escrito de memoria al cerrar el mes y que se perdía al cambiar
+  // de mes; con la tarifa diaria cada uno vale una jornada entera, así que el dato
+  // viene ahora de un registro con autor y fecha.
   const [horasExtraManuales, setHorasExtraManuales] = useState({});
   const [tarifasOperarios, setTarifasOperarios] = useState({});
+
+  // Ausencias del periodo, selladas con su mes como todo lo demás de esta pantalla.
+  const [ausencias, setAusencias] = useState({ periodo: null, lista: [], error: false, sinPermiso: false });
 
   // Ambos estados llevan sellado el periodo al que pertenecen, y solo se escriben
   // dentro de un then/catch. Así el "cargando" es un valor derivado en vez de un
@@ -90,6 +111,30 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
   }, [periodo]);
 
   /**
+   * Las ausencias del periodo, para descontarlas de los días pagados.
+   *
+   * Se filtra por rango de `fecha` (una cadena AAAA-MM-DD, que ordena igual que la
+   * fecha). Es una desigualdad sobre un único campo, así que no necesita índice
+   * compuesto: el de trabajadorId + fecha existe para la ficha, no para esto.
+   */
+  useEffect(() => {
+      if (!esPeriodoValido(periodo)) return undefined;
+      let cancelado = false;
+      const desde = primerDiaISO(periodo);
+      const hasta = ultimoDiaISO(periodo);
+      getDocs(query(collection(db, 'ausencias'), where('fecha', '>=', desde), where('fecha', '<=', hasta)))
+          .then((snap) => {
+              if (cancelado) return;
+              setAusencias({ periodo, lista: snap.docs.map((d) => ({ id: d.id, ...d.data() })), error: false, sinPermiso: false });
+          })
+          .catch((error) => {
+              console.error('No se pudieron leer las ausencias del periodo', error);
+              if (!cancelado) setAusencias({ periodo, lista: [], error: true, sinPermiso: esPermisoDenegado(error) });
+          });
+      return () => { cancelado = true; };
+  }, [periodo]);
+
+  /**
    * ¿Está ya cerrado este mes? El vigente es el de versión más alta.
    * Devuelve el estado en vez de fijarlo, para que el setState quede siempre dentro
    * de un then y nunca en el cuerpo síncrono del efecto.
@@ -119,78 +164,91 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
   /** Al cambiar de mes, los ajustes del anterior no se arrastran. */
   const cambiarPeriodo = (nuevo) => {
       setPeriodo(nuevo);
-      setDiasAusencia({});
-      setHorasManuales({});
       setHorasExtraManuales({});
       setTarifasOperarios({});
   };
 
   // ---- AJUSTES ------------------------------------------------------------
 
-  const handleDiasLibres = (clave, valor) => {
-      const num = parseFloat(valor) || 0;
-      setDiasAusencia(prev => ({ ...prev, [clave]: num }));
-      setHorasManuales(prev => { const nuev = {...prev}; delete nuev[clave]; return nuev; });
-  };
-
-  const restaurarNormales = (clave) => {
-      setHorasManuales(prev => { const nuev = {...prev}; delete nuev[clave]; return nuev; });
-  };
-
   const restaurarExtras = (clave) => {
       setHorasExtraManuales(prev => { const nuev = {...prev}; delete nuev[clave]; return nuev; });
   };
 
-  const handleTarifaChange = (clave, tipo, valor) => {
+  /**
+   * Ajuste manual de la tarifa de hora extra, para el caso excepcional.
+   *
+   * LA CADENA DE PRIORIDAD NO CAMBIA, solo el valor que hay al final: antes el
+   * defecto era una tarifa global tecleada en la pantalla, ahora es la de la
+   * categoria del trabajador. Lo que la oficina escriba aquí sigue mandando sobre
+   * las dos.
+   */
+  const handleTarifaExtra = (clave, valor) => {
       const num = parseFloat(valor) || 0;
-      setTarifasOperarios(prev => ({
-          ...prev,
-          [clave]: {
-              normal: tipo === 'normal' ? num : (prev[clave]?.normal ?? pagoHoraNormal),
-              extra: tipo === 'extra' ? num : (prev[clave]?.extra ?? pagoHoraExtra)
-          }
-      }));
+      setTarifasOperarios(prev => ({ ...prev, [clave]: { extra: num } }));
+  };
+
+  const restaurarTarifaExtra = (clave) => {
+      setTarifasOperarios(prev => { const nuev = { ...prev }; delete nuev[clave]; return nuev; });
   };
 
   // ---- QUIÉN ENTRA EN LA NÓMINA -------------------------------------------
 
   const listaBase = plantillaDelPeriodo(trabajadoresList, trabajadoresTodos, horasTrabajadores);
 
+  // Ausencias del periodo, contadas por persona desde la colección. Ya no se teclean.
+  const ausenciasAlDia = ausencias.periodo === periodo;
+  const ausenciasPorTrabajador = ausenciasAlDia
+      ? contarPorTrabajador(ausencias.lista, primerDiaISO(periodo), ultimoDiaISO(periodo))
+      : {};
+
   const datosCalculados = listaBase.map(trab => {
       const nombre = trab.nombre;
       const clave = claveDe(trab);
 
-      // De los partes SOLO se toman las horas extra. Las normales jamás se derivan de un albarán.
+      // De los partes SOLO se toman las horas extra. La base jamás se deriva de un albarán.
       // Cruce por trabajadorId cuando la cuadrilla lo tiene; si no, por nombre.
       const datosPartes = horasTrabajadores.find(h =>
           (trab.id && h[1].trabajadorId) ? h[1].trabajadorId === trab.id : h[0] === nombre
       );
       const origE = datosPartes ? datosPartes[1].horasExtra : 0;
 
-      const dLibres = diasAusencia[clave] || 0;
+      // LA BASE, POR DÍAS. Sin categoría no hay tarifa diaria y no se inventa ninguna:
+      // el cierre se bloquea más abajo y se dice a quién le falta. Pagar 0 € porque
+      // falta rellenar un campo sería un error caro que nadie notaría.
+      const categoria = categoriaDe(trab, categoriasList);
+      const conCategoria = tieneCategoria(trab) && !!categoria;
 
-      const baseMensual = baseMensualDe(trab);
-      const baseConfigurada = tieneBaseConfigurada(trab);
-      const hNormalCalc = horasNormalesDelPeriodo(baseMensual, dLibres);
+      const diasTrabajables = DIAS_TRABAJABLES_MES;
+      const diasAusencia = ausenciasPorTrabajador[trab.id] || 0;
+      const diasPagados = diasPagadosDelPeriodo(diasTrabajables, diasAusencia);
+      const tarifaDiaria = categoria?.tarifaDiaria ?? 0;
+      const importeBase = importeBaseDelPeriodo(diasPagados, tarifaDiaria);
 
-      const hNormal = horasManuales[clave] !== undefined ? horasManuales[clave] : hNormalCalc;
+      // Las horas extra siguen siendo horas, y siguen saliendo de los albaranes.
       const hExtra = horasExtraManuales[clave] !== undefined ? horasExtraManuales[clave] : origE;
-
-      const normalManual = horasManuales[clave] !== undefined && horasManuales[clave] !== hNormalCalc;
       const extraManual = horasExtraManuales[clave] !== undefined && horasExtraManuales[clave] !== origE;
 
-      const tarifaN = tarifasOperarios[clave]?.normal ?? pagoHoraNormal;
-      const tarifaE = tarifasOperarios[clave]?.extra ?? pagoHoraExtra;
-      const totalPagar = (hNormal * tarifaN) + (hExtra * tarifaE);
+      // Misma cadena de prioridad de siempre; lo único que cambia es el último eslabón.
+      const tarifaCategoria = categoria?.tarifaHoraExtra ?? 0;
+      const tarifaE = tarifasOperarios[clave]?.extra ?? tarifaCategoria;
+      const tarifaExtraManual = tarifasOperarios[clave]?.extra !== undefined && tarifasOperarios[clave].extra !== tarifaCategoria;
+
+      const importeExtra = hExtra * tarifaE;
+      const totalPagar = importeBase + importeExtra;
 
       return { clave, trabajadorId: trab.id || null, nombre, email: trab.email || '',
-               enPapelera: !!trab.enPapelera, hNormal, hExtra, tarifaN, tarifaE, totalPagar,
-               dLibres, origE, baseMensual, baseConfigurada, hNormalCalc, normalManual, extraManual };
+               enPapelera: !!trab.enPapelera,
+               categoriaId: trab.categoriaId ?? null,
+               categoriaNombre: categoria?.nombre ?? trab.categoriaNombre ?? '',
+               conCategoria, tarifaDiaria,
+               diasTrabajables, diasAusencia, diasPagados, importeBase,
+               origE, hExtra, extraManual, tarifaE, tarifaCategoria, tarifaExtraManual, importeExtra,
+               totalPagar };
   }).sort((a, b) => b.totalPagar - a.totalPagar);
 
   const totalGeneralNomina = datosCalculados.reduce((acc, item) => acc + item.totalPagar, 0);
-  const totalAjustesManuales = datosCalculados.filter(item => item.normalManual || item.extraManual).length;
-  const totalSinBaseConfigurada = datosCalculados.filter(item => !item.baseConfigurada).length;
+  const totalAjustesManuales = datosCalculados.filter(item => item.extraManual || item.tarifaExtraManual).length;
+  const sinCategoria = datosCalculados.filter(item => !item.conCategoria);
   const totalEnPapelera = datosCalculados.filter(item => item.enPapelera).length;
 
   // ---- CIERRE. La ÚNICA escritura de esta pantalla. -----------------------
@@ -200,6 +258,19 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
       if (datosCalculados.length === 0) { mostrarToast('No hay trabajadores que liquidar en este periodo.', 'error'); return; }
       if (cobertura.cargando || cobertura.error) {
           mostrarToast('Espera a que terminen de calcularse las horas extra del periodo antes de cerrar.', 'error');
+          return;
+      }
+      if (!ausenciasAlDia || ausencias.error) {
+          mostrarToast('Espera a que terminen de leerse las ausencias del periodo antes de cerrar.', 'error');
+          return;
+      }
+      // SIN CATEGORÍA NO SE CIERRA. Se dice exactamente a quién le falta, en vez de
+      // liquidarle a 0 € y que el error aparezca en una nómina.
+      if (sinCategoria.length > 0) {
+          mostrarToast(
+              `No se puede cerrar: ${sinCategoria.length} trabajador(es) sin categoría asignada (${sinCategoria.map((i) => i.nombre).join(', ')}). Asígnasela en Plantilla.`,
+              'error'
+          );
           return;
       }
 
@@ -239,18 +310,20 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
                       cerradoPor: auth.currentUser?.uid || '',
                       cerradoPorEmail: auth.currentUser?.email || '',
                       cerradoEn: serverTimestamp(),
-                      tarifaNormalGlobal: Number(pagoHoraNormal) || 0,
-                      tarifaExtraGlobal: Number(pagoHoraExtra) || 0,
+                      // Ya no hay tarifas globales: cada uno cobra por su categoría.
+                      diasTrabajables: DIAS_TRABAJABLES_MES,
                       totales: {
                           trabajadores: datosCalculados.length,
-                          horasNormales: datosCalculados.reduce((s, i) => s + i.hNormal, 0),
+                          diasPagados: datosCalculados.reduce((s, i) => s + i.diasPagados, 0),
+                          diasAusencia: datosCalculados.reduce((s, i) => s + i.diasAusencia, 0),
                           horasExtra: datosCalculados.reduce((s, i) => s + i.hExtra, 0),
+                          importeBase: datosCalculados.reduce((s, i) => s + i.importeBase, 0),
                           importe: totalGeneralNomina
                       },
                       cobertura: { albaranesComputados: cobertura.albaranes },
                       cerradoRetroactivamente: pasado,
                       sustituyeA: anterior ? anterior.id : null,
-                      esquema: 1
+                      esquema: 2
                   });
 
                   datosCalculados.forEach((item) => {
@@ -259,18 +332,21 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
                           trabajadorId: id,
                           nombre: item.nombre,          // el nombre de HOY: registro histórico
                           email: item.email,
-                          baseMensual: item.baseMensual,
-                          origenBase: item.baseConfigurada ? 'ficha' : 'defecto',
-                          diasAusencia: item.dLibres,
-                          horasNormalesCalculadas: item.hNormalCalc,
-                          horasNormales: item.hNormal,
-                          ajusteManualNormales: item.normalManual,
+                          // La categoría y su tarifa se CONGELAN aquí. Si el convenio sube
+                          // el año que viene, esta liquidación sigue diciendo lo que se pagó.
+                          categoriaId: item.categoriaId,
+                          categoriaNombre: item.categoriaNombre,
+                          tarifaDiaria: item.tarifaDiaria,
+                          diasTrabajables: item.diasTrabajables,
+                          diasAusencia: item.diasAusencia,
+                          diasPagados: item.diasPagados,
+                          importeBase: item.importeBase,
                           horasExtraDeAlbaranes: item.origE,
                           horasExtra: item.hExtra,
                           ajusteManualExtras: item.extraManual,
-                          tarifaNormal: item.tarifaN,
                           tarifaExtra: item.tarifaE,
-                          tarifaPersonalizada: item.tarifaN !== pagoHoraNormal || item.tarifaE !== pagoHoraExtra,
+                          tarifaPersonalizada: item.tarifaExtraManual,
+                          importeExtra: item.importeExtra,
                           total: item.totalPagar,
                           enPapelera: item.enPapelera
                       });
@@ -322,29 +398,42 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
   // nuevo: un recálculo hoy podría dar otro número y el papel dejaría de coincidir
   // con la liquidación que se pagó.
   const exportarExcelPersonalizado = () => {
+      // El esquema de LO QUE SE EXPORTA manda: un cierre viejo sale con sus columnas de
+      // horas, uno nuevo con las de días. Nunca se mezclan.
+      const esquema = estaCerrado ? esquemaDe(vigente) : 2;
+      const cabeceras = esquema === 1 ? CABECERAS_ESQUEMA_1 : CABECERAS_ESQUEMA_2;
+
       const filas = estaCerrado
-          ? lineasCierre.map((l) => ([
-              textoCSV(l.nombre), numeroCSV(l.baseMensual, 0),
-              textoCSV(l.origenBase === 'ficha' ? 'Ficha del trabajador' : 'Por defecto (sin configurar)'),
-              enteroCSV(l.diasAusencia), numeroCSV(l.horasNormales), numeroCSV(l.horasNormalesCalculadas),
-              textoCSV(l.ajusteManualNormales ? 'SÍ' : ''), numeroCSV(l.horasExtra),
-              numeroCSV(l.horasExtraDeAlbaranes), textoCSV(l.ajusteManualExtras ? 'SÍ' : ''),
-              numeroCSV(l.tarifaNormal), numeroCSV(l.tarifaExtra), numeroCSV(l.total)
-          ]))
+          ? (esquema === 1
+              ? lineasCierre.map((l) => ([
+                  textoCSV(l.nombre), numeroCSV(l.baseMensual, 0),
+                  textoCSV(l.origenBase === 'ficha' ? 'Ficha del trabajador' : 'Por defecto (sin configurar)'),
+                  enteroCSV(l.diasAusencia), numeroCSV(l.horasNormales), numeroCSV(l.horasNormalesCalculadas),
+                  textoCSV(l.ajusteManualNormales ? 'SÍ' : ''), numeroCSV(l.horasExtra),
+                  numeroCSV(l.horasExtraDeAlbaranes), textoCSV(l.ajusteManualExtras ? 'SÍ' : ''),
+                  numeroCSV(l.tarifaNormal), numeroCSV(l.tarifaExtra), numeroCSV(l.total)
+              ]))
+              : lineasCierre.map((l) => ([
+                  textoCSV(l.nombre), textoCSV(l.categoriaNombre), numeroCSV(l.tarifaDiaria),
+                  enteroCSV(l.diasTrabajables), enteroCSV(l.diasAusencia), enteroCSV(l.diasPagados),
+                  numeroCSV(l.importeBase), numeroCSV(l.horasExtra),
+                  numeroCSV(l.horasExtraDeAlbaranes), textoCSV(l.ajusteManualExtras ? 'SÍ' : ''),
+                  numeroCSV(l.tarifaExtra), numeroCSV(l.importeExtra), numeroCSV(l.total)
+              ]))
+          )
           : datosCalculados.map((item) => ([
-              textoCSV(item.nombre), numeroCSV(item.baseMensual, 0),
-              textoCSV(item.baseConfigurada ? 'Ficha del trabajador' : 'Por defecto (sin configurar)'),
-              enteroCSV(item.dLibres), numeroCSV(item.hNormal), numeroCSV(item.hNormalCalc),
-              textoCSV(item.normalManual ? 'SÍ' : ''), numeroCSV(item.hExtra),
+              textoCSV(item.nombre), textoCSV(item.categoriaNombre), numeroCSV(item.tarifaDiaria),
+              enteroCSV(item.diasTrabajables), enteroCSV(item.diasAusencia), enteroCSV(item.diasPagados),
+              numeroCSV(item.importeBase), numeroCSV(item.hExtra),
               numeroCSV(item.origE), textoCSV(item.extraManual ? 'SÍ' : ''),
-              numeroCSV(item.tarifaN), numeroCSV(item.tarifaE), numeroCSV(item.totalPagar)
+              numeroCSV(item.tarifaE), numeroCSV(item.importeExtra), numeroCSV(item.totalPagar)
           ]));
 
       if (filas.length === 0) { mostrarToast('No hay datos para exportar.', 'error'); return; }
 
       const total = estaCerrado ? vigente.totales.importe : totalGeneralNomina;
       const ajustes = estaCerrado
-          ? lineasCierre.filter((l) => l.ajusteManualNormales || l.ajusteManualExtras).length
+          ? lineasCierre.filter((l) => l.ajusteManualNormales || l.ajusteManualExtras).length   // el esquema 1 tenía los dos
           : totalAjustesManuales;
 
       filas.push([textoCSV('TOTAL GLOBAL A PAGAR'), ...Array(11).fill(textoCSV('')), numeroCSV(total)]);
@@ -353,7 +442,7 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
           filas.push([textoCSV('Cierre'), textoCSV(`${vigente.id} · cerrado por ${vigente.cerradoPorEmail || '—'}`)]);
       }
       descargarCSV(`Nomina_${periodo}${estaCerrado ? `_v${vigente.version}` : '_provisional'}.csv`,
-                   construirCSV(CABECERAS_CSV, filas));
+                   construirCSV(cabeceras, filas));
   };
 
   // ---- ESTILOS ------------------------------------------------------------
@@ -415,15 +504,42 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
                   <label style={labelStyle}>Mes de la nómina:</label>
                   <input type="month" value={periodo} onChange={(e) => cambiarPeriodo(e.target.value)} style={inputStyle} />
               </div>
-              <div style={{ flex: 1, minWidth: '120px' }}><label style={labelStyle}>Tarifa Normal (€)</label><input type="number" step="0.5" value={pagoHoraNormal} onFocus={e => e.target.select()} onChange={(e) => setPagoHoraNormal(Number(e.target.value))} disabled={estaCerrado} style={inputStyle} /></div>
-              <div style={{ flex: 1, minWidth: '120px' }}><label style={{...labelStyle, color: color.vidrio}}>Tarifa Extra (€)</label><input type="number" step="0.5" value={pagoHoraExtra} onFocus={e => e.target.select()} onChange={(e) => setPagoHoraExtra(Number(e.target.value))} disabled={estaCerrado} style={{...inputStyle, borderColor: color.vidrio, color: color.vidrio, fontWeight: 'bold'}} /></div>
+              {/* Ya no hay tarifas globales por hora: cada uno cobra por la tarifa diaria
+                  de SU categoría, y la de hora extra sale también de ahí. */}
           </div>
 
           <p style={{ margin: '-10px 0 10px 0', fontSize: '11px', color: color.textoSuave }}>
-              Las horas normales salen de la <strong>base mensual de cada trabajador</strong> (su ficha en Plantilla), menos 8 h por día de ausencia. Las horas extra vienen de los albaranes validados del periodo.
-              {totalSinBaseConfigurada > 0 && (
-                  <span style={{ color: color.aviso, fontWeight: 'bold' }}> · {totalSinBaseConfigurada} trabajador(es) sin base configurada usan {HORAS_BASE_POR_DEFECTO} h por defecto.</span>
-              )}
+              La base sale de la <strong>tarifa diaria de la categoría</strong> de cada trabajador,
+              por <strong>{DIAS_TRABAJABLES_MES} días</strong> menos sus ausencias registradas.
+              Las horas extra vienen de los albaranes validados del periodo, a la tarifa de su categoría.
+          </p>
+
+          {/* SIN CATEGORÍA NO SE CIERRA, y se dice a quién le falta. Liquidar a 0 € a
+              quien no la tiene sería un error caro que nadie notaría hasta la nómina. */}
+          {sinCategoria.length > 0 && (
+              <div style={{ marginBottom: '20px', padding: '15px 20px', border: `1px solid ${color.error}`, backgroundColor: color.errorSuave, display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                  <AlertTriangle size={16} color={color.error} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div style={{ fontSize: '11px', color: color.error, lineHeight: '1.5' }}>
+                      <strong style={{ display: 'block', marginBottom: '4px' }}>
+                          No se puede cerrar: {sinCategoria.length} trabajador(es) sin categoría profesional.
+                      </strong>
+                      {sinCategoria.map((i) => i.nombre).join(', ')}.
+                      <span style={{ display: 'block', marginTop: '6px', color: color.textoSuave }}>
+                          Asígnales una en <strong>Plantilla de Personal</strong>. Sin categoría no hay tarifa
+                          diaria, y no se aplica ninguna por defecto a propósito.
+                      </span>
+                  </div>
+              </div>
+          )}
+
+          {/* Que las ausencias vengan de la colección y no de la memoria de quien cierra
+              es la mitad del cambio: conviene que se vea de dónde salen. */}
+          <p style={{ margin: '0 0 20px 0', fontSize: '11px', color: ausencias.error ? color.error : color.textoSuave }}>
+              {!ausenciasAlDia
+                  ? 'Leyendo las ausencias del periodo…'
+                  : ausencias.error
+                      ? 'No se han podido leer las ausencias. Las cifras de abajo NO son fiables.'
+                      : `${ausencias.lista.length} ausencia(s) registrada(s) en el periodo, contadas desde la pantalla de Ausencias.`}
           </p>
 
           {/* Las horas extra se agregan sobre el periodo completo, no sobre la página
@@ -541,35 +657,39 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
                                       )}
                                   </div>
 
-                                  {/* BASE MENSUAL DEL TRABAJADOR */}
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '10px', padding: '8px 10px', backgroundColor: item.baseConfigurada ? color.superficieTenida : color.avisoSuave, border: `1px solid ${item.baseConfigurada ? color.lineaSuave : color.aviso}`, borderRadius: '4px' }}>
-                                      <span style={{ fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', color: color.textoSuave }}>Base mensual</span>
+                                  {/* CATEGORÍA Y TARIFA DIARIA */}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '10px', padding: '8px 10px', backgroundColor: item.conCategoria ? color.superficieTenida : color.errorSuave, border: `1px solid ${item.conCategoria ? color.lineaSuave : color.error}`, borderRadius: '4px' }}>
+                                      <span style={{ fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', color: color.textoSuave }}>Categoría</span>
                                       <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                          <strong style={{ fontSize: '12px', color: color.texto }}>{item.baseMensual} h</strong>
-                                          {!item.baseConfigurada && (
-                                              <span style={{ fontSize: '8px', fontWeight: 'bold', letterSpacing: '0.5px', textTransform: 'uppercase', backgroundColor: color.aviso, color: color.aviso, padding: '1px 5px', borderRadius: '3px' }} title="Este trabajador no tiene base mensual configurada en su ficha; se aplica el valor por defecto">
-                                                  Por defecto · sin configurar
-                                              </span>
+                                          {item.conCategoria ? (
+                                              <strong style={{ fontSize: '12px', color: color.texto }}>
+                                                  {item.categoriaNombre} · {item.tarifaDiaria.toFixed(2)} €/día
+                                              </strong>
+                                          ) : (
+                                              <strong style={{ fontSize: '11px', color: color.error }} title="Sin categoría no hay tarifa diaria: el cierre está bloqueado">
+                                                  Sin categoría asignada
+                                              </strong>
                                           )}
                                       </span>
                                   </div>
 
-                                  <div style={{ display: 'flex', gap: '10px', backgroundColor: color.fondo, padding: '10px', border: `1px solid ${color.linea}`, borderRadius: '4px' }}>
-                                      <div style={{ flex: 1 }}>
-                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.error, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}><CalendarOff size={10}/> DÍAS LIBRES</label>
-                                          <input type="number" value={item.dLibres} onFocus={e => e.target.select()} onChange={(e) => handleDiasLibres(item.clave, e.target.value)} style={{ ...inputStyle, padding: '6px', fontSize: '11px', backgroundColor: color.superficie, borderColor: color.error }} title="Resta 8 horas por día" />
+                                  <div style={{ display: 'flex', gap: '10px', backgroundColor: color.fondo, padding: '10px', border: `1px solid ${color.linea}`, borderRadius: '4px', flexWrap: 'wrap' }}>
+                                      <div style={{ flex: 1, minWidth: '80px' }}>
+                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.textoSuave, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>DÍAS MES</label>
+                                          <div style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold' }}>{item.diasTrabajables}</div>
                                       </div>
-                                      <div style={{ flex: 1 }}>
-                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.texto, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px', minHeight: '12px' }}>
-                                              H. NORMALES
-                                              {item.normalManual && (
-                                                  <>
-                                                      <Insignia tono="aviso" title={`Ajustado a mano. El cálculo automático da ${item.hNormalCalc} h`}><PencilLine size={8}/> Manual</Insignia>
-                                                      <button type="button" onClick={() => restaurarNormales(item.clave)} style={btnRestaurarStyle} title={`Volver al valor calculado (${item.hNormalCalc} h)`}><RotateCcw size={10}/></button>
-                                                  </>
-                                              )}
-                                          </label>
-                                          <input type="number" step="0.5" value={item.hNormal} onFocus={e => e.target.select()} onChange={(e) => setHorasManuales(prev => ({...prev, [item.clave]: parseFloat(e.target.value)||0}))} style={{ ...inputStyle, padding: '6px', fontSize: '11px', backgroundColor: item.normalManual ? color.avisoSuave : color.superficie, borderColor: item.normalManual ? color.aviso : undefined, fontWeight: 'bold' }} title={item.normalManual ? `Ajustado a mano. Cálculo automático: ${item.hNormalCalc} h` : `Base ${item.baseMensual} h − ${item.dLibres} día(s) × 8 h`} />
+                                      <div style={{ flex: 1, minWidth: '80px' }}>
+                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.error, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}><CalendarOff size={10}/> AUSENCIAS</label>
+                                          <div
+                                              style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', color: item.diasAusencia > 0 ? color.error : color.texto }}
+                                              title="Contadas desde la pantalla de Ausencias. Ya no se teclean aquí."
+                                          >
+                                              {item.diasAusencia}
+                                          </div>
+                                      </div>
+                                      <div style={{ flex: 1, minWidth: '80px' }}>
+                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.texto, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>DÍAS PAGADOS</label>
+                                          <div style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold' }} title={`${item.diasTrabajables} − ${item.diasAusencia}`}>{item.diasPagados}</div>
                                       </div>
                                       <div style={{ flex: 1 }}>
                                           <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.vidrio, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px', minHeight: '12px' }}>
@@ -585,14 +705,24 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
                                       </div>
                                   </div>
 
-                                  <div style={{ display: 'flex', gap: '10px', backgroundColor: color.superficieTenida, padding: '10px', border: `1px solid ${color.lineaSuave}`, borderRadius: '4px' }}>
-                                      <div style={{ flex: 1 }}>
-                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.textoSuave, display: 'block', marginBottom: '3px' }}>€/H NORMAL</label>
-                                          <input type="number" step="0.5" value={item.tarifaN} onFocus={e => e.target.select()} onChange={(e) => handleTarifaChange(item.clave, 'normal', e.target.value)} style={{ ...inputStyle, padding: '6px', fontSize: '11px', backgroundColor: color.superficie }} />
+                                  <div style={{ display: 'flex', gap: '10px', backgroundColor: color.superficieTenida, padding: '10px', border: `1px solid ${color.lineaSuave}`, borderRadius: '4px', flexWrap: 'wrap' }}>
+                                      <div style={{ flex: 1, minWidth: '110px' }}>
+                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.textoSuave, display: 'block', marginBottom: '3px' }}>IMPORTE BASE</label>
+                                          <div style={{ padding: '6px', fontSize: '12px', fontWeight: 'bold' }} title={`${item.diasPagados} días × ${item.tarifaDiaria.toFixed(2)} €`}>
+                                              {item.importeBase.toFixed(2)} €
+                                          </div>
                                       </div>
-                                      <div style={{ flex: 1 }}>
-                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.vidrio, display: 'block', marginBottom: '3px' }}>€/H EXTRA</label>
-                                          <input type="number" step="0.5" value={item.tarifaE} onFocus={e => e.target.select()} onChange={(e) => handleTarifaChange(item.clave, 'extra', e.target.value)} style={{ ...inputStyle, padding: '6px', fontSize: '11px', backgroundColor: color.superficie, borderColor: color.vidrio, color: color.vidrio, fontWeight: 'bold' }} />
+                                      <div style={{ flex: 1, minWidth: '110px' }}>
+                                          <label style={{ fontSize: '9px', fontWeight: 'bold', color: color.vidrio, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px', minHeight: '12px' }}>
+                                              €/H EXTRA
+                                              {item.tarifaExtraManual && (
+                                                  <>
+                                                      <Insignia tono="aviso" title={`Ajustada a mano. Su categoría dice ${item.tarifaCategoria} €`}><PencilLine size={8}/> Manual</Insignia>
+                                                      <button type="button" onClick={() => restaurarTarifaExtra(item.clave)} style={btnRestaurarStyle} title={`Volver a la de su categoría (${item.tarifaCategoria} €)`}><RotateCcw size={10}/></button>
+                                                  </>
+                                              )}
+                                          </label>
+                                          <input type="number" step="0.5" value={item.tarifaE} onFocus={e => e.target.select()} onChange={(e) => handleTarifaExtra(item.clave, e.target.value)} style={{ ...inputStyle, padding: '6px', fontSize: '11px', backgroundColor: item.tarifaExtraManual ? color.avisoSuave : color.superficie, borderColor: item.tarifaExtraManual ? color.aviso : color.vidrio, color: item.tarifaExtraManual ? color.aviso : color.vidrio, fontWeight: 'bold' }} title={`De su categoría: ${item.tarifaCategoria} €/h`} />
                                       </div>
                                   </div>
 
