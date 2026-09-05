@@ -13,7 +13,7 @@ const testEnv = await initializeTestEnvironment({
 });
 await testEnv.clearFirestore();
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'roles/uid-admin'), { admin: true });
+    await setDoc(doc(ctx.firestore(), 'roles/uid-admin'), { admin: true, veNominas: true });
 });
 
 const operario = testEnv.authenticatedContext('uid-op1', { email: 'juan@empresa.com' }).firestore();

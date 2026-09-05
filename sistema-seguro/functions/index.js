@@ -16,21 +16,27 @@ if (getApps().length === 0) {
 /**
  * Única vía para escribir en roles/{uid}.
  *
- * Recibe { uid?, email?, esAdmin } y verifica en el servidor que quien llama ya
- * es administrador antes de tocar nada.
+ * Recibe { uid?, email?, permiso, valor } y verifica en el servidor que quien llama ya
+ * es administrador antes de tocar nada. `permiso` es 'admin' o 'veNominas': dos
+ * permisos independientes que se conceden y retiran por separado.
+ *
+ * COMPATIBILIDAD: se sigue aceptando el `esAdmin` de la forma anterior. La función está
+ * desplegada y la interfaz servida desde Vercel puede tardar en actualizarse; una
+ * pestaña vieja llamando con la forma vieja debe seguir funcionando en vez de romperse.
  */
 exports.asignarRolAdmin = onCall({ region: 'us-central1' }, async (peticion) => {
     if (!peticion.auth) {
         throw new HttpsError('unauthenticated', 'Debes haber iniciado sesión.');
     }
 
-    const { uid, email, esAdmin } = peticion.data || {};
+    const { uid, email, permiso, valor, esAdmin } = peticion.data || {};
 
     return cambiarPermisoAdmin({
         solicitanteUid: peticion.auth.uid,
         uid,
         email,
-        esAdmin
+        permiso: permiso ?? 'admin',
+        valor: valor ?? esAdmin
     });
 });
 

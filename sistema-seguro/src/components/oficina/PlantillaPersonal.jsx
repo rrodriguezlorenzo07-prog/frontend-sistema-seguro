@@ -12,8 +12,39 @@ export default function PlantillaPersonal({
     editandoTrabId, trabEditado, setTrabEditado, 
     guardarEdicionTrabajador, enviarResetPass, 
     setEditandoTrabId, iniciarEdicionTrabajador, 
-    borrarTrabajador, cambiarRolTrabajador, cambiandoRolId // <--- AÑADIDO AQUI
+    borrarTrabajador, cambiarPermisoTrabajador, cambiandoPermiso
 }) {
+  /**
+   * Un interruptor por permiso. Los DOS son independientes: administrar la obra no
+   * implica ver lo que se paga, y por eso el de nóminas no se deshabilita para quien
+   * no es admin — deshabilitarlo insinuaría una jerarquía que no existe. El aviso de
+   * que todavía no le sirve va en la confirmación.
+   */
+  const Interruptor = ({ trab, permiso, activo, etiquetaSi, etiquetaNo }) => {
+      const aplicando = cambiandoPermiso?.id === trab.id && cambiandoPermiso?.permiso === permiso;
+      return (
+          <button
+              onClick={() => cambiarPermisoTrabajador(trab.id, permiso, activo, trab.nombre)}
+              disabled={!!cambiandoPermiso}
+              title={permiso === 'veNominas'
+                  ? 'Ver las horas extra y los importes de toda la plantilla'
+                  : 'Entrar al panel de oficina: validar partes, planificar y catálogos'}
+              style={{
+                  padding: '6px 12px', borderRadius: '50px', fontSize: '10px', fontWeight: 'bold',
+                  letterSpacing: '1px', textTransform: 'uppercase',
+                  cursor: cambiandoPermiso ? 'wait' : 'pointer',
+                  opacity: cambiandoPermiso && !aplicando ? 0.4 : (aplicando ? 0.6 : 1),
+                  border: activo ? `1px solid ${color.vidrio}` : `1px solid ${color.linea}`,
+                  backgroundColor: activo ? color.infoSuave : color.fondo,
+                  color: activo ? color.vidrio : color.textoSuave,
+                  transition: 'all 0.2s ease-in-out'
+              }}
+          >
+              {aplicando ? 'Aplicando...' : (activo ? etiquetaSi : etiquetaNo)}
+          </button>
+      );
+  };
+
   return (
       <div style={blockStyle}>
           <h3 style={{ margin: '0 0 25px 0', fontSize: '18px', fontWeight: '300', letterSpacing: '2px', textTransform: 'uppercase' }}>Centro de Recursos Humanos</h3>
@@ -48,30 +79,25 @@ export default function PlantillaPersonal({
                                   <div style={{ fontSize: '11px', color: color.textoSuave, marginTop: '4px' }}>CUENTA VINCULADA: {trab.email ? trab.email : 'SIN VINCULAR'}</div>
                                   <div style={{ fontSize: '11px', color: trab.horasBaseMensuales ? color.textoSuave : color.aviso, marginTop: '2px' }}>BASE MENSUAL: {trab.horasBaseMensuales ? `${trab.horasBaseMensuales} h` : `${HORAS_BASE_POR_DEFECTO} h (por defecto, sin configurar)`}</div>
                               </div>
-                              <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-                                  
-                                  {/* BOTÓN INTERRUPTOR PARA CAMBIAR DE ROL */}
-                                  <button 
-                                      onClick={() => cambiarRolTrabajador(trab.id, trab.rol || 'operario', trab.nombre)}
-                                      disabled={cambiandoRolId === trab.id}
-                                      style={{
-                                          padding: '6px 12px',
-                                          borderRadius: '50px',
-                                          fontSize: '10px',
-                                          fontWeight: 'bold',
-                                          letterSpacing: '1px',
-                                          textTransform: 'uppercase',
-                                          cursor: cambiandoRolId === trab.id ? 'wait' : 'pointer',
-                                          opacity: cambiandoRolId === trab.id ? 0.6 : 1,
-                                          border: trab.rol === 'admin' ? `1px solid ${color.vidrio}` : `1px solid ${color.linea}`,
-                                          backgroundColor: trab.rol === 'admin' ? color.infoSuave : color.fondo,
-                                          color: trab.rol === 'admin' ? color.vidrio : color.textoSuave,
-                                          transition: 'all 0.2s ease-in-out'
-                                      }}
-                                      title="Haz clic para cambiar los permisos"
-                                  >
-                                      {cambiandoRolId === trab.id ? 'Aplicando...' : (trab.rol === 'admin' ? 'Administrador' : 'Operario')}
-                                  </button>
+                              <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+
+                                  {/* DOS PERMISOS INDEPENDIENTES, un interruptor cada uno. */}
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <Interruptor
+                                          trab={trab}
+                                          permiso="admin"
+                                          activo={trab.rol === 'admin'}
+                                          etiquetaSi="Operativa"
+                                          etiquetaNo="Sin oficina"
+                                      />
+                                      <Interruptor
+                                          trab={trab}
+                                          permiso="veNominas"
+                                          activo={trab.veNominas === true}
+                                          etiquetaSi="Nóminas"
+                                          etiquetaNo="Sin nóminas"
+                                      />
+                                  </div>
 
                                   <button onClick={() => iniciarEdicionTrabajador(trab)} style={{ color: color.texto, background: 'none', border: 'none', cursor: 'pointer' }}><Edit size={16}/></button>
                                   <button onClick={() => borrarTrabajador(trab.id)} style={{ color: color.texto, background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={16}/></button>

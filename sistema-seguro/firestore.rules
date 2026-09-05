@@ -43,6 +43,28 @@ service cloud.firestore {
       );
     }
 
+    // Permiso SEPARADO para ver lo que se paga. Calca la estructura de esAdmin() —
+    // claim del token o roles/{uid}— y es INDEPENDIENTE de él: administrar la obra
+    // (validar partes, planificar, gestionar catálogos) no implica ver nóminas, y
+    // varias personas pueden tener este permiso además del admin original.
+    //
+    // esAdmin() NO SE TOCA a propósito: cuelgan de ella quince bloques y cualquier
+    // cambio se propagaría a todos a la vez. Donde hace falta separar, se exigen las
+    // dos: `esAdmin() && veNominas()`. Quien ve nóminas es también gente de oficina.
+    //
+    // Un permiso que no está escrito vale false: `.get('veNominas', false)`. Por eso el
+    // despliegue va DESPUÉS del backfill que se lo pone a los administradores actuales
+    // — al revés, se quedarían todos fuera de la nómina el mismo día.
+    function veNominas() {
+      return autenticado() && (
+        request.auth.token.get('veNominas', false) == true ||
+        (
+          exists(/databases/$(database)/documents/roles/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.get('veNominas', false) == true
+        )
+      );
+    }
+
     // Campos que cambian entre el documento actual y el entrante
     function tocados() {
       return request.resource.data.diff(resource.data).affectedKeys();
@@ -121,15 +143,22 @@ service cloud.firestore {
 
     // ------------------------------------------------------------- validaciones
     // Cuadrilla y horas extra por operario, fuera del parte para que su creador no
-    // vea las de sus compañeros. Solo oficina, ni siquiera el autor del parte.
+    // vea las de sus compañeros.
+    //
+    // DATO SALARIAL: `cuadrilla[].horasExtra` y `horasExtraAsignadas` son lo que se
+    // paga de más a cada persona. Por eso aquí no basta con ser de oficina: hacen falta
+    // los DOS permisos. Un administrador operativo sin `veNominas` no lee esto.
+    //
+    // Los cuatro verbos, no solo la lectura: quien no puede ver las horas extra tampoco
+    // debe poder asignarlas ni borrarlas.
 
     match /validaciones/{parteId} {
-      allow read: if esAdmin();
-      allow create, update: if esAdmin()
+      allow read: if esAdmin() && veNominas();
+      allow create, update: if esAdmin() && veNominas()
                             && request.resource.data.keys().hasAll(['cuadrilla', 'horasExtraAsignadas'])
                             && request.resource.data.cuadrilla is list
                             && request.resource.data.horasExtraAsignadas is number;
-      allow delete: if esAdmin();
+      allow delete: if esAdmin() && veNominas();
     }
 
     // ------------------------------------------------------------ trabajadores
@@ -206,9 +235,9 @@ service cloud.firestore {
     // haría imposible el primer cierre.
 
     match /nominas/{cierreId} {
-      allow read: if esAdmin();
+      allow read: if esAdmin() && veNominas();
 
-      allow create: if esAdmin()
+      allow create: if esAdmin() && veNominas()
                     && request.resource.data.estado == 'cerrado'
                     && request.resource.data.cerradoPor == request.auth.uid
                     && request.resource.data.periodo.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
@@ -225,9 +254,9 @@ service cloud.firestore {
       // Una línea por trabajador. El id del documento es su trabajadorId, así que
       // un mismo trabajador no puede aparecer dos veces en el mismo cierre.
       match /lineas/{trabajadorId} {
-        allow read: if esAdmin();
+        allow read: if esAdmin() && veNominas();
 
-        allow create: if esAdmin()
+        allow create: if esAdmin() && veNominas()
                       && request.resource.data.trabajadorId == trabajadorId
                       && request.resource.data.horasNormales is number
                       && request.resource.data.horasExtra is number

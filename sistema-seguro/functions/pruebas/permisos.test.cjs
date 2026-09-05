@@ -64,7 +64,7 @@ const leerClaims = async (uid) => (await auth.getUser(uid)).customClaims || {};
     const resultado = await cambiarPermisoAdmin({
         solicitanteUid: jefe.uid,
         email: 'juan@empresa.com',   // el cliente solo conoce el email de la ficha
-        esAdmin: true
+        permiso: 'admin', valor: true
     });
 
     const rolJuan = await leerRol(juan.uid);
@@ -79,12 +79,12 @@ const leerClaims = async (uid) => (await auth.getUser(uid)).customClaims || {};
 
     // ---- CASO 2: Juan ya puede ejercer de admin --------------------------
     console.log('\n─── CASO 2: Juan, ya admin, puede ascender a Ana ───');
-    await cambiarPermisoAdmin({ solicitanteUid: juan.uid, email: 'ana@empresa.com', esAdmin: true });
+    await cambiarPermisoAdmin({ solicitanteUid: juan.uid, email: 'ana@empresa.com', permiso: 'admin', valor: true });
     comprobar('el permiso recién concedido es efectivo', (await leerRol(ana.uid))?.admin === true);
 
     // ---- CASO 3: retirar el permiso --------------------------------------
     console.log('\n─── CASO 3: el jefe retira el permiso a Ana ───');
-    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, esAdmin: false });
+    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, permiso: 'admin', valor: false });
     comprobar('roles/{uid}.admin queda en false', (await leerRol(ana.uid))?.admin === false);
     const claimsAna = await leerClaims(ana.uid);
     comprobar('el custom claim se retira entero, no se deja en false',
@@ -93,7 +93,7 @@ const leerClaims = async (uid) => (await auth.getUser(uid)).customClaims || {};
     // ---- CASO 4: un no-admin no puede ------------------------------------
     console.log('\n─── CASO 4: Ana (ya sin permiso) intenta ascenderse ───');
     try {
-        await cambiarPermisoAdmin({ solicitanteUid: ana.uid, uid: ana.uid, esAdmin: true });
+        await cambiarPermisoAdmin({ solicitanteUid: ana.uid, uid: ana.uid, permiso: 'admin', valor: true });
         comprobar('debería haber sido rechazada', false);
     } catch (error) {
         comprobar('rechazada con permission-denied', error.code === 'permission-denied' || String(error.code).includes('permission-denied'), error.message);
@@ -103,7 +103,7 @@ const leerClaims = async (uid) => (await auth.getUser(uid)).customClaims || {};
     // ---- CASO 5: nadie se deja a sí mismo fuera --------------------------
     console.log('\n─── CASO 5: el jefe intenta retirarse el permiso a sí mismo ───');
     try {
-        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: jefe.uid, esAdmin: false });
+        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: jefe.uid, permiso: 'admin', valor: false });
         comprobar('debería haber sido bloqueado', false);
     } catch (error) {
         comprobar('bloqueado con failed-precondition', String(error.code).includes('failed-precondition'), error.message);
@@ -114,19 +114,77 @@ const leerClaims = async (uid) => (await auth.getUser(uid)).customClaims || {};
     // ---- CASO 7: los dos sitios nunca se separan -------------------------
     console.log('\n─── CASO 7: conceder y retirar deja siempre los dos sitios de acuerdo ───');
     for (const valor of [true, false, true]) {
-        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, esAdmin: valor });
+        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, permiso: 'admin', valor: valor });
         const enFirestore = (await leerRol(ana.uid))?.admin === true;
         const enToken = (await leerClaims(ana.uid)).admin === true;
-        comprobar(`esAdmin=${valor} -> roles/=${enFirestore}, claim=${enToken}`, enFirestore === valor && enToken === valor);
+        comprobar(`admin=${valor} -> roles/=${enFirestore}, claim=${enToken}`, enFirestore === valor && enToken === valor);
     }
 
     // ---- CASO 6: email sin cuenta de acceso ------------------------------
     console.log('\n─── CASO 6: trabajador cuyo email no tiene cuenta en Auth ───');
     try {
-        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, email: 'fantasma@empresa.com', esAdmin: true });
+        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, email: 'fantasma@empresa.com', permiso: 'admin', valor: true });
         comprobar('debería haber fallado', false);
     } catch (error) {
         comprobar('error not-found explicativo', String(error.code).includes('not-found'), error.message);
+    }
+
+    // ---- CASO 8: los dos permisos son INDEPENDIENTES ---------------------
+    console.log('\n─── CASO 8: veNominas se concede y se retira sin tocar admin ───');
+
+    // Ana queda admin (viene del caso 7 en true) y sin veNominas.
+    comprobar('de partida: admin sí, veNominas no',
+              (await leerRol(ana.uid))?.admin === true && (await leerRol(ana.uid))?.veNominas !== true);
+
+    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, permiso: 'veNominas', valor: true });
+    let rolAna = await leerRol(ana.uid);
+    let claimsAna8 = await leerClaims(ana.uid);
+    comprobar('conceder veNominas NO pisa admin', rolAna?.admin === true && rolAna?.veNominas === true,
+              JSON.stringify({ admin: rolAna?.admin, veNominas: rolAna?.veNominas }));
+    comprobar('y el claim lleva los dos', claimsAna8.admin === true && claimsAna8.veNominas === true,
+              JSON.stringify(claimsAna8));
+
+    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, permiso: 'admin', valor: false });
+    rolAna = await leerRol(ana.uid);
+    claimsAna8 = await leerClaims(ana.uid);
+    comprobar('retirar admin NO pisa veNominas', rolAna?.admin === false && rolAna?.veNominas === true,
+              JSON.stringify({ admin: rolAna?.admin, veNominas: rolAna?.veNominas }));
+    comprobar('el claim admin se va y veNominas se queda',
+              !('admin' in claimsAna8) && claimsAna8.veNominas === true, JSON.stringify(claimsAna8));
+
+    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, permiso: 'veNominas', valor: false });
+    claimsAna8 = await leerClaims(ana.uid);
+    comprobar('retirar veNominas quita la llave entera, no la deja en false',
+              !('veNominas' in claimsAna8), JSON.stringify(claimsAna8));
+
+    // ---- CASO 9: la salvaguarda es SOLO para admin -----------------------
+    console.log('\n─── CASO 9: uno puede retirarse a sí mismo veNominas, pero no admin ───');
+
+    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: jefe.uid, permiso: 'veNominas', valor: true });
+    comprobar('el jefe se concede veNominas', (await leerRol(jefe.uid))?.veNominas === true);
+
+    // Quedarse sin ver nóminas es recuperable: otro admin se lo devuelve. Quedarse sin
+    // admin puede dejar la oficina sin nadie, y por eso solo eso está protegido.
+    await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: jefe.uid, permiso: 'veNominas', valor: false });
+    comprobar('SÍ puede retirarse veNominas a sí mismo', (await leerRol(jefe.uid))?.veNominas === false);
+    comprobar('y sigue siendo admin', (await leerRol(jefe.uid))?.admin === true);
+
+    try {
+        await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: jefe.uid, permiso: 'admin', valor: false });
+        comprobar('retirarse admin debería seguir bloqueado', false);
+    } catch (error) {
+        comprobar('retirarse admin sigue bloqueado', String(error.code).includes('failed-precondition'), error.message);
+    }
+
+    // ---- CASO 10: un permiso inventado se rechaza ------------------------
+    console.log('\n─── CASO 10: solo existen los dos permisos ───');
+    for (const malo of ['superadmin', 'admin ', '', null]) {
+        try {
+            await cambiarPermisoAdmin({ solicitanteUid: jefe.uid, uid: ana.uid, permiso: malo, valor: true });
+            comprobar(`permiso «${malo}» debería rechazarse`, false);
+        } catch (error) {
+            comprobar(`permiso «${malo}» rechazado`, String(error.code).includes('invalid-argument'), error.message);
+        }
     }
 
     console.log(fallos === 0 ? '\n══ TODAS LAS COMPROBACIONES PASAN ══' : `\n══ ${fallos} COMPROBACIÓN(ES) FALLIDA(S) ══`);

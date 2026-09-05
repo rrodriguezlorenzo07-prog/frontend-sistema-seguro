@@ -18,7 +18,7 @@ await testEnv.clearFirestore();
 
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, 'roles/uid-admin'), { admin: true });
+    await setDoc(doc(db, 'roles/uid-admin'), { admin: true, veNominas: true });
     // Un parte pendiente, listo para validar
     await setDoc(doc(db, 'partes_de_trabajo/parte-pendiente'), {
         obra: 'Hotel Sol', creador: 'juan@empresa.com', estado: 'pendiente',

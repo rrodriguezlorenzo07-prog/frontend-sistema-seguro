@@ -26,6 +26,10 @@ export default function App() {
     const [usuarioLogueado, setUsuarioLogueado] = useState(null);
     const [nombreUsuario, setNombreUsuario] = useState('');
     const [esAdmin, setEsAdmin] = useState(false);
+    // Permiso separado para ver lo que se paga. Sale del CLAIM DEL TOKEN, que es la
+    // misma fuente que evalúan las reglas: si la pantalla lo leyera de la ficha del
+    // trabajador podría enseñar una pestaña que Firestore va a denegar.
+    const [veNominas, setVeNominas] = useState(false);
     const [errorLogin, setErrorLogin] = useState('');
 
     useEffect(() => {
@@ -61,8 +65,19 @@ export default function App() {
 
                     setNombreUsuario(nombreDB);
                     setEsAdmin(esAdminDB);
-                } catch (error) { 
-                    console.error("Error al verificar rol: ", error); 
+                } catch (error) {
+                    console.error("Error al verificar rol: ", error);
+                }
+
+                // El claim va por su cuenta: si la consulta de arriba falla, el permiso
+                // de nóminas no debe quedar colgado del error de otra cosa. Y al revés,
+                // que no se pueda leer el token no debe dejar a nadie sin entrar.
+                try {
+                    const token = await usuario.getIdTokenResult();
+                    setVeNominas(token.claims.veNominas === true);
+                } catch (error) {
+                    console.error("Error al leer el permiso de nóminas: ", error);
+                    setVeNominas(false);
                 }
                 
                 setSesionIniciada(true); 
@@ -71,6 +86,7 @@ export default function App() {
             } else {
                 setSesionIniciada(false); 
                 setUsuarioLogueado(null);
+                setVeNominas(false);
             }
         });
         return () => unsubscribe();
@@ -170,7 +186,7 @@ export default function App() {
                 pantalla de teléfono cada píxel de margen se nota. */}
             <main style={{ padding: esMovil ? '0px' : espacio.xl }}>
                 {vistaActiva === 'redactar' && <ParteTrabajo usuario={usuarioLogueado} esAdmin={esAdmin} volverOficina={() => setVistaActiva('oficina')} />}
-                {vistaActiva === 'oficina' && esAdmin && <Tarjeta relleno="ninguno" style={{ width: '100%', maxWidth: '1280px', margin: '0 auto', overflow: 'hidden' }}><PanelOficina cambiarVista={() => setVistaActiva('redactar')} /></Tarjeta>}
+                {vistaActiva === 'oficina' && esAdmin && <Tarjeta relleno="ninguno" style={{ width: '100%', maxWidth: '1280px', margin: '0 auto', overflow: 'hidden' }}><PanelOficina cambiarVista={() => setVistaActiva('redactar')} veNominas={veNominas} /></Tarjeta>}
             </main>
         </div>
     );

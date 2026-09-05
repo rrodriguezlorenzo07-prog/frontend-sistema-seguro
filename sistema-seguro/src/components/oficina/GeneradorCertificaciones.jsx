@@ -7,6 +7,7 @@ import { horasTotalesDocumento } from '../../utils/horasDocumento';
 import { color } from '../../estilos/tokens';
 import Insignia from '../../ui/Insignia';
 import { cantidadDeLinea } from '../../logica/unidades';
+ import { albaranParaCertificacion } from '../../logica/certificaciones';
 import Modal from '../../ui/Modal';
 import Boton from '../../ui/Boton';
 import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
@@ -187,7 +188,7 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
               obra: certObraSeleccionada, referencia: numCert, totalHoras: 0, totalImporte: totalCertificacion,
               fecha: new Date().toLocaleDateString(), timestamp: Date.now(), facturado: false, papelera: false,
               modo: 'libre', partidas: partidasFinales, partesIds: esModoLibre ? [] : certPartesSeleccionados,
-              albaranes: esModoLibre ? [] : albaranesSeleccionadosData
+              albaranes: esModoLibre ? [] : albaranesSeleccionadosData.map(albaranParaCertificacion)
           };
 
           const docRef = await addDoc(collection(db, 'certificaciones'), nuevaCert);
@@ -248,7 +249,7 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
           pdfDoc.setFontSize(12); pdfDoc.setFont("helvetica", "bold"); 
           pdfDoc.text(`TOTAL HORAS CERTIFICADAS: ${totalHorasCert} h`, 196, finalY, { align: 'right' }); 
 
-          const nuevaCert = { obra: certObraSeleccionada, partesIds: certPartesSeleccionados, referencia: numCert, totalHoras: totalHorasCert, fecha: new Date().toLocaleDateString(), timestamp: Date.now(), facturado: false, papelera: false, albaranes: albaranesSeleccionadosData };
+          const nuevaCert = { obra: certObraSeleccionada, partesIds: certPartesSeleccionados, referencia: numCert, totalHoras: totalHorasCert, fecha: new Date().toLocaleDateString(), timestamp: Date.now(), facturado: false, papelera: false, albaranes: albaranesSeleccionadosData.map(albaranParaCertificacion) };
           const docRef = await addDoc(collection(db, 'certificaciones'), nuevaCert);
           
           for (let id of certPartesSeleccionados) { await updateDoc(doc(db, 'partes_de_trabajo', id), { certificado: true, idCertificacion: docRef.id }); }
@@ -324,7 +325,7 @@ export default function GeneradorCertificaciones({ blockStyle, labelStyle, input
                                           <div key={idx} style={{ padding: '0', backgroundColor: color.superficie, border: `1px solid ${color.linea}`, display: 'flex', flexDirection: 'column' }}> 
                                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: color.fondo, padding: '10px 15px', borderBottom: `1px solid ${color.linea}` }}>
                                                   <strong style={{ fontSize: '12px', color: color.texto }}>DÍA: {alb.fecha}</strong>
-                                                  <div><span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '10px' }}>Mat: {costeMatDia.toFixed(2)}€</span><Insignia tono="fuerte">{horasTotalesDocumento(alb)} H</Insignia></div>
+                                                  <div><span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '10px' }}>Mat: {costeMatDia.toFixed(2)}€</span><Insignia tono="fuerte">{alb.horasTotales ?? horasTotalesDocumento(alb)} H</Insignia></div>
                                               </div>
                                               <div style={{ padding: '15px', borderBottom: `1px dashed ${color.linea}` }}>
                                                   {alb.tareasRealizadas && alb.tareasRealizadas.length > 0 ? (

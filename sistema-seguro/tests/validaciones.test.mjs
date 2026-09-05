@@ -16,7 +16,7 @@ const testEnv = await initializeTestEnvironment({
 await testEnv.clearFirestore();
 
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'roles/uid-admin'), { admin: true });
+    await setDoc(doc(ctx.firestore(), 'roles/uid-admin'), { admin: true, veNominas: true });
     await setDoc(doc(ctx.firestore(), 'partes_de_trabajo/parte-1'), {
         obra: 'Hotel Sol', creador: 'juan@empresa.com', estado: 'aprobado', timestamp: Date.now()
     });

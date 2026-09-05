@@ -66,7 +66,7 @@ async function main() {
   // ---- Semilla, saltándose las reglas (paso 3 del encargo) -----------------
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, 'roles/uid-admin'), { admin: true });
+    await setDoc(doc(db, 'roles/uid-admin'), { admin: true, veNominas: true });
     await setDoc(doc(db, 'trabajadores/t-admin'), { nombre: 'Oficina', email: EMAIL_ADMIN, rol: 'admin', papelera: false });
     await setDoc(doc(db, 'trabajadores/t-op1'), { nombre: 'Juan', email: EMAIL_OP1, rol: 'operario', papelera: false });
     await setDoc(doc(db, 'trabajadores/t-op2'), { nombre: 'Ana', email: EMAIL_OP2, rol: 'operario', papelera: false });

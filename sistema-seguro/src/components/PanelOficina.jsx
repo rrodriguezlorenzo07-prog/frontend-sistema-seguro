@@ -37,7 +37,7 @@ import GestionVehiculos from './oficina/GestionVehiculos';
 import CuadranteDiario from './oficina/CuadranteDiario';
 import AcopiosObra from './oficina/AcopiosObra';
 
-export default function PanelOficina({ cambiarVista }) {
+export default function PanelOficina({ cambiarVista, veNominas = false }) {
   const TAMANO_PAGINA = 300;
   const LIMITE_DOCUMENTOS = 200;
 
@@ -76,7 +76,13 @@ export default function PanelOficina({ cambiarVista }) {
   const [modoBusqueda, setModoBusqueda] = useState(false);
   
   const [categoriaActiva, setCategoriaActiva] = useState('validacion');
-  const [pestañaActiva, setPestañaActiva] = useState('bandeja');
+  const [pestañaPedida, setPestañaActiva] = useState('bandeja');
+
+  // La pestaña de nóminas no existe sin el permiso, así que se DERIVA en vez de
+  // corregirse con un efecto: si a alguien se lo retiran con la pestaña abierta —el
+  // claim se relee al renovar el token, puede pasar en caliente— cae en Plantilla en el
+  // mismo render, sin pasar por un hueco vacío.
+  const pestañaActiva = (!veNominas && pestañaPedida === 'horas') ? 'trabajadores' : pestañaPedida;
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
   
   const [nuevaObra, setNuevaObra] = useState('');
@@ -93,7 +99,9 @@ export default function PanelOficina({ cambiarVista }) {
   const [nuevoTrabajadorEmail, setNuevoTrabajadorEmail] = useState('');
   const [nuevoTrabajadorPass, setNuevoTrabajadorPass] = useState(''); 
   const [editandoTrabId, setEditandoTrabId] = useState(null);
-  const [cambiandoRolId, setCambiandoRolId] = useState(null);
+  // Qué permiso se está aplicando y a quién: {id, permiso}. Con dos interruptores por
+  // fila, un solo id dejaría los dos en «Aplicando…» a la vez.
+  const [cambiandoPermiso, setCambiandoPermiso] = useState(null);
   const [trabEditado, setTrabEditado] = useState({});
 
   const hoy = new Date();
@@ -498,9 +506,17 @@ export default function PanelOficina({ cambiarVista }) {
 
   const registrarTrabajador = async () => { if(!nuevoTrabajadorNombre) { mostrarToast("Escribe el nombre del trabajador.", "error"); return; } try { if (nuevoTrabajadorEmail && nuevoTrabajadorPass) { if (nuevoTrabajadorPass.length < 6) { mostrarToast("La contraseña debe tener al menos 6 caracteres.", "error"); return; } const credenciales = await createUserWithEmailAndPassword(authSecundario, nuevoTrabajadorEmail, nuevoTrabajadorPass); await sendEmailVerification(credenciales.user); } await addDoc(collection(db, 'trabajadores'), { nombre: nuevoTrabajadorNombre.trim(), email: nuevoTrabajadorEmail.trim().toLowerCase(), rol: 'operario', papelera: false, horasBaseMensuales: HORAS_BASE_POR_DEFECTO }); setNuevoTrabajadorNombre(''); setNuevoTrabajadorEmail(''); setNuevoTrabajadorPass(''); refrescarTrabajadores(); mostrarToast("Trabajador registrado en plantilla."); } catch (error) { mostrarToast("Error: " + error.message, "error"); } };
   
-  const cambiarRolTrabajador = (id, rolActual, nombre) => {
+  /**
+   * Concede o retira UNO de los dos permisos, que son independientes:
+   *   'admin'      administración operativa
+   *   'veNominas'  ver lo que se paga
+   *
+   * El aviso habla de LO QUE SE VE, no del nombre del flag: quien decide esto necesita
+   * saber qué está abriendo, y «veNominas = true» no se lo dice.
+   */
+  const cambiarPermisoTrabajador = (id, permiso, valorActual, nombre) => {
       const trabajador = trabajadoresList.find(t => t.id === id);
-      const nuevoRol = (rolActual === 'admin') ? 'operario' : 'admin';
+      const nuevoValor = !valorActual;
 
       // El permiso real vive en roles/{uid de Auth}, y la ficha solo guarda el email.
       if (!trabajador?.email) {
@@ -508,29 +524,60 @@ export default function PanelOficina({ cambiarVista }) {
           return;
       }
 
-      pedirConfirmacion("Cambiar Permisos", `¿Convertir a ${nombre} en ${nuevoRol.toUpperCase()}?`, async () => {
-          if (cambiandoRolId) return;
-          setCambiandoRolId(id);
-          try {
-              // 1. Permiso efectivo: roles/{uid} está cerrado a los clientes por reglas,
-              //    así que solo lo escribe la Cloud Function con el Admin SDK.
-              const asignarRolAdmin = httpsCallable(functions, 'asignarRolAdmin');
-              const respuesta = await asignarRolAdmin({ email: trabajador.email, esAdmin: nuevoRol === 'admin' });
+      const enLlano = permiso === 'veNominas'
+          ? (nuevoValor
+              ? `${nombre} podrá ver las horas extra y los importes a pagar de TODA la plantilla.`
+              : `${nombre} dejará de ver las horas extra y los importes de la plantilla.`)
+          : (nuevoValor
+              ? `${nombre} podrá entrar al panel de oficina: validar partes, planificar y gestionar los catálogos.`
+              : `${nombre} dejará de tener acceso al panel de oficina.`);
 
-              // 2. Rol visible en la ficha, solo para la interfaz.
-              await updateDoc(doc(db, 'trabajadores', id), { rol: nuevoRol });
-              actualizarEnLista(setTrabajadoresList, id, { rol: nuevoRol });
+      // Conceder nóminas a quien no es de oficina no sirve de nada todavía: no puede
+      // entrar al panel donde se ve. Se avisa en vez de impedirlo, porque los dos
+      // permisos son ortogonales a propósito y el orden de concesión es cosa suya.
+      const esAdminOperativo = (trabajador.rol === 'admin');
+      const avisoInutil = (permiso === 'veNominas' && nuevoValor && !esAdminOperativo)
+          ? ' OJO: sin acceso al panel de oficina no podrá usarlo hasta que también se lo des.'
+          : '';
 
-              const aplicado = respuesta?.data?.admin === true ? 'con acceso de administrador' : 'sin acceso de administrador';
-              mostrarToast(`${nombre} queda ${aplicado}.`);
-          } catch (error) {
-              // La lista no se ha tocado todavía, así que no hay nada que revertir.
-              console.error(error);
-              mostrarToast(`No se pudo cambiar el permiso: ${error?.message || 'error desconocido'}`, "error");
-          } finally {
-              setCambiandoRolId(null);
-          }
-      });
+      // Un claim no llega a una sesión abierta hasta que el token se renueva.
+      const avisoToken = ' El cambio le llegará al renovarse su sesión (hasta 1 h, o al volver a entrar).';
+
+      pedirConfirmacion(
+          nuevoValor ? 'Conceder permiso' : 'Retirar permiso',
+          enLlano + avisoInutil + avisoToken + ' ¿Continuar?',
+          async () => {
+              if (cambiandoPermiso) return;
+              setCambiandoPermiso({ id, permiso });
+              try {
+                  // roles/{uid} está cerrado a los clientes por reglas, así que solo lo
+                  // escribe la Cloud Function con el Admin SDK.
+                  const asignarRolAdmin = httpsCallable(functions, 'asignarRolAdmin');
+                  const respuesta = await asignarRolAdmin({ email: trabajador.email, permiso, valor: nuevoValor });
+
+                  // ESPEJO EN LA FICHA, SOLO PARA PINTAR. La fuente de verdad es
+                  // roles/{uid}, que está cerrada a los clientes: sin esta copia la
+                  // pantalla no podría saber en qué posición va cada interruptor.
+                  // Mismo criterio que el `rol` que ya existía para 'admin'.
+                  //
+                  // Se escribe lo que quedó ESCRITO en roles/, no lo que se pidió.
+                  const espejo = permiso === 'admin'
+                      ? { rol: respuesta?.data?.admin === true ? 'admin' : 'operario' }
+                      : { veNominas: respuesta?.data?.veNominas === true };
+                  await updateDoc(doc(db, 'trabajadores', id), espejo);
+                  actualizarEnLista(setTrabajadoresList, id, espejo);
+
+                  const quedo = respuesta?.data?.[permiso] === true;
+                  const etiqueta = permiso === 'veNominas' ? 'ver nóminas' : 'administración operativa';
+                  mostrarToast(`${nombre}: ${quedo ? 'concedido' : 'retirado'} «${etiqueta}».`);
+              } catch (error) {
+                  // La lista no se ha tocado todavía, así que no hay nada que revertir.
+                  console.error(error);
+                  mostrarToast(`No se pudo cambiar el permiso: ${error?.message || 'error desconocido'}`, "error");
+              } finally {
+                  setCambiandoPermiso(null);
+              }
+          });
   };
 
   const enviarResetPass = (email) => { if (!email) return; pedirConfirmacion("Resetear Contraseña", `¿Enviar un enlace oficial a ${email} para cambiar su contraseña?`, async () => { try { await sendPasswordResetEmail(auth, email); mostrarToast(`Enlace enviado con éxito a ${email}`); } catch (error) { mostrarToast("Error: " + error.message, "error"); } }); };
@@ -853,7 +900,7 @@ export default function PanelOficina({ cambiarVista }) {
           {categoriaActiva === 'almacen' && ( <><button onClick={()=>setPestañaActiva('almacen')} style={subMenuBtnStyle(pestañaActiva === 'almacen')}>Inventario</button><button onClick={()=>setPestañaActiva('acopios')} style={subMenuBtnStyle(pestañaActiva === 'acopios')}>Acopios por Obra</button></> )}
           {categoriaActiva === 'proyectos' && ( <><button onClick={()=>setPestañaActiva('obras')} style={subMenuBtnStyle(pestañaActiva === 'obras')}>Gestión de Hoteles / Obras</button><button onClick={()=>setPestañaActiva('resumen')} style={subMenuBtnStyle(pestañaActiva === 'resumen')}>Métricas y Dashboard</button></> )}
           {categoriaActiva === 'documentos' && ( <><button onClick={()=>setPestañaActiva('partes')} style={subMenuBtnStyle(pestañaActiva === 'partes')}>Albaranes Históricos</button><button onClick={()=>setPestañaActiva('certificaciones')} style={subMenuBtnStyle(pestañaActiva === 'certificaciones')}>Certificaciones Mensuales</button><button onClick={()=>setPestañaActiva('facturacion')} style={subMenuBtnStyle(pestañaActiva === 'facturacion')}>Generar Factura</button></> )}
-          {categoriaActiva === 'personal' && ( <><button onClick={()=>setPestañaActiva('trabajadores')} style={subMenuBtnStyle(pestañaActiva === 'trabajadores')}>Plantilla Activa</button><button onClick={()=>setPestañaActiva('horas')} style={subMenuBtnStyle(pestañaActiva === 'horas')}>Control de Nóminas</button></> )}
+          {categoriaActiva === 'personal' && ( <><button onClick={()=>setPestañaActiva('trabajadores')} style={subMenuBtnStyle(pestañaActiva === 'trabajadores')}>Plantilla Activa</button>{veNominas && (<button onClick={()=>setPestañaActiva('horas')} style={subMenuBtnStyle(pestañaActiva === 'horas')}>Control de Nóminas</button>)}</> )}
           {categoriaActiva === 'sistema' && ( <><button onClick={()=>setPestañaActiva('papelera')} style={subMenuBtnStyle(pestañaActiva === 'papelera')}>Papelera de Reciclaje</button></> )}
       </div>
 
@@ -864,8 +911,8 @@ export default function PanelOficina({ cambiarVista }) {
       {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} unidadesPropuestas={unidadesPropuestas} unidadesAConfirmar={unidadesAConfirmar} alternarUnidad={alternarUnidad} alternarTodasLasUnidades={alternarTodasLasUnidades} /> )}
       {pestañaActiva === 'resumen' && ( <ResumenMetricas partesDeHoy={partesDeHoy} totalHorasHoy={totalHorasHoy} trabajadoresHoy={trabajadoresHoy} porcentajeGlobal={porcentajeGlobal} /> )}
       {pestañaActiva === 'obras' && ( <GestionProyectos blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevaObra={nuevaObra} setNuevaObra={setNuevaObra} numPlantas={numPlantas} setNumPlantas={setNumPlantas} configHabitaciones={configHabitaciones} setConfigHabitaciones={setConfigHabitaciones} generarHotelInteligente={generarHotelInteligente} obrasList={obrasActivas} obraActiva={obraActiva} setObraActiva={setObraActiva} borrarObra={borrarObra} obtenerEstadisticasHotel={obtenerEstadisticasHotel} marcarTareaHotel={marcarTareaHotel} /> )}
-      {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarRolTrabajador={cambiarRolTrabajador} cambiandoRolId={cambiandoRolId} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} /> )}
-{pestañaActiva === 'horas' && ( <ControlNominas trabajadoresList={trabajadoresActivos} trabajadoresTodos={trabajadoresList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} pagoHoraNormal={pagoHoraNormal} setPagoHoraNormal={setPagoHoraNormal} pagoHoraExtra={pagoHoraExtra} setPagoHoraExtra={setPagoHoraExtra} pedirConfirmacion={pedirConfirmacion} mostrarToast={mostrarToast} /> )}      {pestañaActiva === 'almacen' && ( <InventarioAlmacen blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} inputStyle={inputStyle} exportarAlmacenExcel={exportarAlmacenExcel} nuevoMatNombre={nuevoMatNombre} setNuevoMatNombre={setNuevoMatNombre} materialesList={materialesList} nuevoMatStock={nuevoMatStock} setNuevoMatStock={setNuevoMatStock} agregarMaterial={agregarMaterial} filtroMateriales={filtroMateriales} setFiltroMateriales={setFiltroMateriales} ordenMateriales={ordenMateriales} setOrdenMateriales={setOrdenMateriales} materialesCoincidentes={materialesCoincidentes} editandoMatId={editandoMatId} matEditado={matEditado} setMatEditado={setMatEditado} guardarEdicionMat={guardarEdicionMat} setEditandoMatId={setEditandoMatId} iniciarEdicionMat={iniciarEdicionMat} borrarMaterial={borrarMaterial} /> )}
+      {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarPermisoTrabajador={cambiarPermisoTrabajador} cambiandoPermiso={cambiandoPermiso} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} /> )}
+{pestañaActiva === 'horas' && veNominas && ( <ControlNominas trabajadoresList={trabajadoresActivos} trabajadoresTodos={trabajadoresList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} pagoHoraNormal={pagoHoraNormal} setPagoHoraNormal={setPagoHoraNormal} pagoHoraExtra={pagoHoraExtra} setPagoHoraExtra={setPagoHoraExtra} pedirConfirmacion={pedirConfirmacion} mostrarToast={mostrarToast} /> )}      {pestañaActiva === 'almacen' && ( <InventarioAlmacen blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} inputStyle={inputStyle} exportarAlmacenExcel={exportarAlmacenExcel} nuevoMatNombre={nuevoMatNombre} setNuevoMatNombre={setNuevoMatNombre} materialesList={materialesList} nuevoMatStock={nuevoMatStock} setNuevoMatStock={setNuevoMatStock} agregarMaterial={agregarMaterial} filtroMateriales={filtroMateriales} setFiltroMateriales={setFiltroMateriales} ordenMateriales={ordenMateriales} setOrdenMateriales={setOrdenMateriales} materialesCoincidentes={materialesCoincidentes} editandoMatId={editandoMatId} matEditado={matEditado} setMatEditado={setMatEditado} guardarEdicionMat={guardarEdicionMat} setEditandoMatId={setEditandoMatId} iniciarEdicionMat={iniciarEdicionMat} borrarMaterial={borrarMaterial} /> )}
       {pestañaActiva === 'partes' && ( 
           <HistorialAlbaranes 
               blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} exportarPartesExcel={exportarPartesExcel} 
