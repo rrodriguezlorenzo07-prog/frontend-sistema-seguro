@@ -28,6 +28,12 @@
  * @property {number} [horasBaseMensuales]   base de contrato; sin ella se aplica el
  *                                           valor por defecto de utils/nomina.js
  * @property {boolean} [enPapelera]          lo añade plantillaDelPeriodo(), no la base
+ * @property {boolean} [veNominas]           espejo del permiso de roles/{uid}, SOLO para
+ *                                           pintar el interruptor: la fuente de verdad
+ *                                           es roles/{uid}, cerrada a los clientes
+ * @property {string|null} [categoriaId]     categoría del convenio (rediseño, Fase 1)
+ * @property {string} [categoriaNombre]      desnormalizado junto al id, mismo criterio
+ *                                           que obraNombre en cuadrantes
  */
 
 // ---------------------------------------------------------------------- obras
@@ -309,6 +315,48 @@
  * @property {string} actualizadoPor quién movió el último estado
  * @property {number} creadoEn
  * @property {string} creadoPor siempre oficina (A1)
+ */
+
+
+// ------------------------------- categorías y ausencias (rediseño de nóminas)
+
+/**
+ * Una categoría del convenio. Vive en `categorias_profesionales/{id}`.
+ *
+ * Las tarifas NO están en el código: el convenio se revisa cada año por la cláusula del
+ * IPC y las cifras se teclean desde la pantalla.
+ *
+ * @typedef {Object} CategoriaProfesional
+ * @property {string} [id]
+ * @property {string} nombre           «Oficial 1ª», «Peón»… texto libre
+ * @property {number} tarifaDiaria     € por día trabajado
+ * @property {number} tarifaHoraExtra  € por hora extra; también depende de la categoría
+ * @property {boolean} [papelera]
+ * @property {number} creadoEn
+ * @property {string} creadoPor
+ * @property {number} actualizadoEn
+ * @property {string} actualizadoPor
+ */
+
+/**
+ * Un día que un trabajador no vino. Vive en `ausencias/{id}`.
+ *
+ * Antes esto era un número tecleado al cerrar la nómina y se perdía al cambiar de mes.
+ * Con la tarifa diaria cada ausencia vale una jornada entera, así que pasa a ser un
+ * registro con autor y fecha.
+ *
+ * No se registran en sábado ni domingo: es lo que hace viable el modelo de días
+ * naturales sin calendario laboral. La comprobación vive en logica/ausencias.js.
+ *
+ * @typedef {Object} Ausencia
+ * @property {string} [id]
+ * @property {string} trabajadorId
+ * @property {string} [trabajadorNombre]  desnormalizado, para que sobreviva a un renombrado
+ * @property {string} fecha               «AAAA-MM-DD»
+ * @property {string} tipo                falta | vacaciones | baja | permiso | otro
+ * @property {string} [motivo]            texto libre
+ * @property {string} creadoPor
+ * @property {number} creadoEn
  */
 
 export {};

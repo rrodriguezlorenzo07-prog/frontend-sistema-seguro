@@ -2,6 +2,7 @@ import React from 'react';
 import { Edit, Trash2, KeyRound } from 'lucide-react';
 import { HORAS_BASE_POR_DEFECTO } from '../../utils/nomina';
 import { color } from '../../estilos/tokens';
+import { categoriasActivas } from '../../logica/categorias';
 
 export default function PlantillaPersonal({ 
     blockStyle, labelStyle, inputStyle, btnBlackStyle, 
@@ -12,8 +13,12 @@ export default function PlantillaPersonal({
     editandoTrabId, trabEditado, setTrabEditado, 
     guardarEdicionTrabajador, enviarResetPass, 
     setEditandoTrabId, iniciarEdicionTrabajador, 
-    borrarTrabajador, cambiarPermisoTrabajador, cambiandoPermiso
+    borrarTrabajador, cambiarPermisoTrabajador, cambiandoPermiso,
+    // Rediseño de nóminas, Fase 1. Solo llegan con permiso de nóminas: la categoría es
+    // una tarifa del convenio y no la ve quien no puede ver lo que se paga.
+    veNominas = false, categoriasList = [], asignarCategoria = null
 }) {
+  const categorias = categoriasActivas(categoriasList);
   /**
    * Un interruptor por permiso. Los DOS son independientes: administrar la obra no
    * implica ver lo que se paga, y por eso el de nóminas no se deshabilita para quien
@@ -78,6 +83,36 @@ export default function PlantillaPersonal({
                                   <strong style={{ fontSize: '13px', textTransform: 'uppercase' }}>{trab.nombre}</strong>
                                   <div style={{ fontSize: '11px', color: color.textoSuave, marginTop: '4px' }}>CUENTA VINCULADA: {trab.email ? trab.email : 'SIN VINCULAR'}</div>
                                   <div style={{ fontSize: '11px', color: trab.horasBaseMensuales ? color.textoSuave : color.aviso, marginTop: '2px' }}>BASE MENSUAL: {trab.horasBaseMensuales ? `${trab.horasBaseMensuales} h` : `${HORAS_BASE_POR_DEFECTO} h (por defecto, sin configurar)`}</div>
+
+                                  {/* Categoría del convenio (rediseño, Fase 1). Solo con permiso
+                                      de nóminas: de ella cuelgan las tarifas.
+
+                                      Todavía no la usa ningún cálculo — la nómina sigue saliendo de
+                                      la base mensual de arriba, que por eso NO se toca ni se quita. */}
+                                  {veNominas && asignarCategoria && (
+                                      <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                          <label style={{ ...labelStyle, margin: 0 }} htmlFor={`cat-${trab.id}`}>CATEGORÍA:</label>
+                                          <select
+                                              id={`cat-${trab.id}`}
+                                              value={trab.categoriaId ?? ''}
+                                              onChange={(e) => asignarCategoria(trab.id, e.target.value || null, trab.nombre)}
+                                              style={{
+                                                  padding: '6px 10px', fontSize: '11px', fontFamily: 'inherit',
+                                                  border: `1px solid ${trab.categoriaId ? color.linea : color.aviso}`,
+                                                  backgroundColor: color.superficie, color: color.texto,
+                                                  outline: 'none', maxWidth: '220px'
+                                              }}
+                                          >
+                                              <option value="">— Sin categoría —</option>
+                                              {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                          </select>
+                                          {categorias.length === 0 && (
+                                              <span style={{ fontSize: '10px', color: color.aviso }}>
+                                                  No hay categorías: créalas primero.
+                                              </span>
+                                          )}
+                                      </div>
+                                  )}
                               </div>
                               <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
 

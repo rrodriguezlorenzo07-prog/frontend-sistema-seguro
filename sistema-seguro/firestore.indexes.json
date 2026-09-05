@@ -133,6 +133,25 @@
     },
     {
       "//": [
+        "Las ausencias de un trabajador, en orden de fecha (rediseño de nóminas, Fase 1).",
+        "  where('trabajadorId','==', id) + orderBy('fecha')",
+        "Es la consulta de la ficha, y la que mañana contará los días del periodo."
+      ],
+      "collectionGroup": "ausencias",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "trabajadorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fecha",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": [
         "Lo que FALTA en el tablero (A4): los acopios de varias obras que aún no están",
         "listos.",
         "  where('obraId','in', [...]) + where('estado','!=','listo')",

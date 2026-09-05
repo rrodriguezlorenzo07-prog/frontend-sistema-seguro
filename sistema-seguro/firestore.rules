@@ -267,14 +267,28 @@ service cloud.firestore {
 
       // Una línea por trabajador. El id del documento es su trabajadorId, así que
       // un mismo trabajador no puede aparecer dos veces en el mismo cierre.
+      //
+      // DOS ESQUEMAS CONVIVEN, y la cabecera dice cuál con su campo `esquema`:
+      //   1  modelo de horas   -> base mensual menos ausencias, en horas
+      //   2  modelo de días    -> días trabajados por la tarifa diaria de la categoría
+      //
+      // La comprobación acepta cualquiera de los dos. Se amplía AHORA, antes de que
+      // exista el cálculo que la usa, porque las reglas se despliegan antes que la
+      // interfaz: si llegara primero un cierre del esquema 2 con esta regla sin tocar,
+      // el lote entero se rechazaría y la liquidación no se podría cerrar.
+      //
+      // Un cierre NO SE RECALCULA JAMÁS con el otro modelo: se lee según su `esquema`.
       match /lineas/{trabajadorId} {
         allow read: if esAdmin() && veNominas();
 
         allow create: if esAdmin() && veNominas()
                       && request.resource.data.trabajadorId == trabajadorId
-                      && request.resource.data.horasNormales is number
                       && request.resource.data.horasExtra is number
-                      && request.resource.data.total is number;
+                      && request.resource.data.total is number
+                      && (
+                           request.resource.data.horasNormales is number      // esquema 1
+                        || request.resource.data.diasTrabajados is number     // esquema 2
+                      );
 
         allow update, delete: if false;
       }
@@ -442,6 +456,48 @@ service cloud.firestore {
         && request.resource.data.actualizadoPor.lower() == correo()
         && request.resource.data.estado in ['pendiente', 'fabricado', 'recepcionado', 'listo']
       );
+    }
+
+    // ======================= CATEGORÍAS Y AUSENCIAS (rediseño de nóminas, Fase 1)
+    //
+    // Los dos son DATO SALARIAL, y por eso NO siguen el patrón de cuadrillas/vehiculos
+    // —que son `autenticado()` porque el operario los necesita—. Aquí hacen falta los
+    // dos permisos, igual que en validaciones/ y nominas/.
+    //
+    // FASE ADITIVA: nada de lo que ya funciona los usa todavía. ControlNominas sigue con
+    // el modelo de horas y su contador de ausencias tecleado a mano, sin tocar.
+
+    // --------------------------------------------- categorias_profesionales
+    // La tabla del convenio: cuánto vale un día y cuánto una hora extra en cada
+    // categoría. Publicarla a todo el que entre —como se hace con las cuadrillas— sería
+    // dejar los sueldos de la empresa en el móvil de cada operario.
+
+    match /categorias_profesionales/{categoriaId} {
+      allow get, list: if esAdmin() && veNominas();
+      allow create, update, delete: if esAdmin() && veNominas();
+    }
+
+    // ------------------------------------------------------------- ausencias
+    // Los días que alguien no vino. Con el modelo nuevo cada uno vale una jornada
+    // completa de tarifa, así que quien no puede ver lo que se paga tampoco decide
+    // quién falta.
+    //
+    // QUE NO SE PUEDA REGISTRAR EN SÁBADO O DOMINGO NO SE COMPRUEBA AQUÍ, a propósito:
+    // vive en src/logica/ausencias.js, donde se prueba con node --test en milisegundos.
+    // Es la restricción que hace viable el modelo de días naturales sin calendario
+    // laboral, y protege del error honesto —del dedo que se equivoca de fila— no de un
+    // tercero, que no gana absolutamente nada saltándosela.
+
+    match /ausencias/{ausenciaId} {
+      allow get, list: if esAdmin() && veNominas();
+
+      allow create: if esAdmin() && veNominas()
+                    && request.resource.data.trabajadorId is string
+                    && request.resource.data.trabajadorId != ''
+                    && request.resource.data.fecha is string
+                    && request.resource.data.fecha.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+
+      allow update, delete: if esAdmin() && veNominas();
     }
 
     // ------------------------------------------------------- denegación por defecto

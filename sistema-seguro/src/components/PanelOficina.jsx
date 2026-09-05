@@ -12,6 +12,8 @@ import { horasTotalesDocumento } from '../utils/horasDocumento';
 import { HORAS_BASE_POR_DEFECTO } from '../utils/nomina';
 import { cambioDeEstado, trocearParaConsulta } from '../logica/acopios';
 import { correosDeCuadrilla } from '../logica/cuadrantes';
+import { construirCategoria, cambiosDeCategoria } from '../logica/categorias';
+import { construirAusencia } from '../logica/ausencias';
 
 import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV, fechaParaNombre } from '../utils/csv';
 import { hidratarPartes, rangoDeFechas, filtrarPorRango, buscarPartes, resumenDelDia, marcarFacturados } from '../logica/partes';
@@ -26,6 +28,8 @@ import ResumenMetricas from './oficina/ResumenMetricas';
 import GestionProyectos from './oficina/GestionProyectos';
 import PlantillaPersonal from './oficina/PlantillaPersonal';
 import ControlNominas from './oficina/ControlNominas';
+import CategoriasProfesionales from './oficina/CategoriasProfesionales';
+import RegistroAusencias from './oficina/RegistroAusencias';
 import InventarioAlmacen from './oficina/InventarioAlmacen';
 import HistorialAlbaranes from './oficina/HistorialAlbaranes';
 import GeneradorCertificaciones from './oficina/GeneradorCertificaciones';
@@ -49,6 +53,13 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
 
   // --- Planificación (F1 y F2). Se carga aparte de cargarDatos(): solo hace falta
   // cuando se abre la categoría, y así la carga inicial del panel no paga por ello.
+  // Rediseño de nóminas, Fase 1. Aditivo: nada de lo que ya calcula los usa todavía.
+  const [categoriasList, setCategoriasList] = useState([]);
+  const [ausenciasList, setAusenciasList] = useState([]);
+  const [trabajadorAusencias, setTrabajadorAusencias] = useState(null);
+  const [guardandoCategoria, setGuardandoCategoria] = useState(false);
+  const [guardandoAusencia, setGuardandoAusencia] = useState(false);
+
   const [cuadrillasList, setCuadrillasList] = useState([]);
   const [vehiculosList, setVehiculosList] = useState([]);
   const [cuadranteFecha, setCuadranteFecha] = useState(() => new Date().toISOString().slice(0, 10));
@@ -82,7 +93,13 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
   // corregirse con un efecto: si a alguien se lo retiran con la pestaña abierta —el
   // claim se relee al renovar el token, puede pasar en caliente— cae en Plantilla en el
   // mismo render, sin pasar por un hueco vacío.
-  const pestañaActiva = (!veNominas && pestañaPedida === 'horas') ? 'trabajadores' : pestañaPedida;
+  // Lo de la Fase 1 se DERIVA del permiso, no se corrige con un efecto: sin permiso no
+  // hay categorías ni ausencias que enseñar, aunque quedaran en memoria de antes.
+  const categorias = veNominas ? categoriasList : [];
+  const ausencias = veNominas ? ausenciasList : [];
+
+  const PESTANAS_DE_NOMINAS = ['horas', 'ausencias', 'categorias'];
+  const pestañaActiva = (!veNominas && PESTANAS_DE_NOMINAS.includes(pestañaPedida)) ? 'trabajadores' : pestañaPedida;
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
   
   const [nuevaObra, setNuevaObra] = useState('');
@@ -193,6 +210,57 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
   }, []);
 
   /**
+   * Categorías y ausencias (rediseño de nóminas, Fase 1).
+   *
+   * VAN APARTE de los catálogos de planificación, y no dentro de la carga general: las
+   * dos colecciones exigen `esAdmin() && veNominas()`, así que para un administrador
+   * operativo estas consultas fallarían. Pedirlas sin permiso no rompería la pantalla
+   * —el catch está justo aquí— pero llenaría la consola de errores en cada carga.
+   */
+  /** Solo lee y devuelve; no toca estado. Así el efecto puede escribirlo dentro del then. */
+  const leerNominaFase1 = useCallback(async () => {
+      const [snapCategorias, snapAusencias] = await Promise.all([
+          getDocs(collection(db, 'categorias_profesionales')),
+          getDocs(collection(db, 'ausencias'))
+      ]);
+      return {
+          categorias: mapear(snapCategorias).filter(c => !c.papelera),
+          ausencias: mapear(snapAusencias)
+      };
+  }, []);
+
+  // El estado se escribe DENTRO del then, nunca en el cuerpo síncrono del efecto: mismo
+  // criterio que las lecturas de ControlNominas. Y sin permiso no se pide nada — lo que
+  // se pinta se deriva más abajo, no se corrige vaciando listas.
+  useEffect(() => {
+      if (!veNominas) return undefined;
+      let cancelado = false;
+      leerNominaFase1()
+          .then((r) => {
+              if (cancelado) return;
+              setCategoriasList(r.categorias);
+              setAusenciasList(r.ausencias);
+          })
+          .catch((error) => {
+              // El caso real: te retiran el permiso con la pantalla abierta.
+              console.error('No se pudieron leer categorías y ausencias', error);
+          });
+      return () => { cancelado = true; };
+  }, [veNominas, leerNominaFase1]);
+
+  /** Recarga tras escribir. Se llama desde manejadores, no desde un efecto. */
+  const refrescarNominaFase1 = useCallback(async () => {
+      if (!veNominas) return;
+      try {
+          const r = await leerNominaFase1();
+          setCategoriasList(r.categorias);
+          setAusenciasList(r.ausencias);
+      } catch (error) {
+          console.error('No se pudieron releer categorías y ausencias', error);
+      }
+  }, [veNominas, leerNominaFase1]);
+
+  /**
    * Asignaciones de un día. Se consulta por igualdad de `fecha` y se ordena por hora:
    * ese par exige el índice compuesto de firestore.indexes.json, que se despliega
    * ANTES que esta pantalla.
@@ -205,6 +273,112 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
       ));
       setAsignaciones(mapear(snap));
   }, []);
+
+  // ============ CATEGORÍAS Y AUSENCIAS (rediseño de nóminas, Fase 1) ==========
+  //
+  // Escriben en dos colecciones nuevas y NO tocan nada de lo que ya se calcula. La
+  // nómina sigue saliendo de la base mensual en horas hasta la fase siguiente.
+
+  const quienSoy = () => auth.currentUser?.email ?? 'oficina';
+
+  const crearCategoria = async (form) => {
+      if (guardandoCategoria) return;
+      setGuardandoCategoria(true);
+      try {
+          await addDoc(collection(db, 'categorias_profesionales'), construirCategoria({ ...form, creadoPor: quienSoy() }));
+          await refrescarNominaFase1();
+          mostrarToast(`Categoría «${form.nombre}» creada.`);
+      } catch (error) {
+          console.error(error);
+          mostrarToast(`No se pudo crear la categoría: ${error?.message || 'error desconocido'}`, 'error');
+      } finally { setGuardandoCategoria(false); }
+  };
+
+  const editarCategoria = async (id, form) => {
+      if (guardandoCategoria) return;
+      setGuardandoCategoria(true);
+      try {
+          await updateDoc(doc(db, 'categorias_profesionales', id), cambiosDeCategoria({ ...form, actualizadoPor: quienSoy() }));
+          await refrescarNominaFase1();
+          // El nombre está desnormalizado en las fichas: si cambia, hay que arrastrarlo o
+          // la plantilla enseñaría el de antes. Mismo criterio que obraNombre.
+          const afectados = trabajadoresList.filter((t) => t.categoriaId === id);
+          for (const t of afectados) {
+              await updateDoc(doc(db, 'trabajadores', t.id), { categoriaNombre: form.nombre.trim() });
+              actualizarEnLista(setTrabajadoresList, t.id, { categoriaNombre: form.nombre.trim() });
+          }
+          mostrarToast(`Categoría actualizada${afectados.length ? ` (${afectados.length} ficha(s) al día)` : ''}.`);
+      } catch (error) {
+          console.error(error);
+          mostrarToast(`No se pudo guardar la categoría: ${error?.message || 'error desconocido'}`, 'error');
+      } finally { setGuardandoCategoria(false); }
+  };
+
+  const borrarCategoria = (id, nombre, enUso) => {
+      // A la papelera, no borrado: una liquidación futura podría querer decir de qué
+      // categoría salió. Y se avisa de a cuánta gente deja sin categoría.
+      pedirConfirmacion(
+          'Quitar categoría',
+          enUso > 0
+              ? `«${nombre}» la usan ${enUso} trabajador(es), que se quedarán sin categoría asignada. ¿Continuar?`
+              : `¿Quitar la categoría «${nombre}»?`,
+          async () => {
+              try {
+                  await updateDoc(doc(db, 'categorias_profesionales', id), { papelera: true, actualizadoEn: Date.now(), actualizadoPor: quienSoy() });
+                  await refrescarNominaFase1();
+                  mostrarToast(`Categoría «${nombre}» quitada.`);
+              } catch (error) {
+                  console.error(error);
+                  mostrarToast(`No se pudo quitar: ${error?.message || 'error desconocido'}`, 'error');
+              }
+          });
+  };
+
+  const asignarCategoria = async (trabajadorId, categoriaId, nombreTrabajador) => {
+      const categoria = categoriasList.find((c) => c.id === categoriaId);
+      // El nombre viaja junto al id, como obraNombre junto a obraId: la pantalla pinta
+      // sin resolver referencias, y el id sigue siendo lo único que manda.
+      const cambio = { categoriaId: categoriaId ?? null, categoriaNombre: categoria?.nombre ?? '' };
+      try {
+          await updateDoc(doc(db, 'trabajadores', trabajadorId), cambio);
+          actualizarEnLista(setTrabajadoresList, trabajadorId, cambio);
+          mostrarToast(categoriaId
+              ? `${nombreTrabajador}: categoría «${categoria?.nombre}».`
+              : `${nombreTrabajador} se queda sin categoría.`);
+      } catch (error) {
+          console.error(error);
+          mostrarToast(`No se pudo asignar la categoría: ${error?.message || 'error desconocido'}`, 'error');
+      }
+  };
+
+  const crearAusencia = async (datos) => {
+      if (guardandoAusencia) return;
+      setGuardandoAusencia(true);
+      try {
+          await addDoc(collection(db, 'ausencias'), construirAusencia({ ...datos, creadoPor: quienSoy() }));
+          await refrescarNominaFase1();
+          mostrarToast(`Ausencia registrada el ${datos.fecha}.`);
+      } catch (error) {
+          console.error(error);
+          mostrarToast(`No se pudo registrar la ausencia: ${error?.message || 'error desconocido'}`, 'error');
+      } finally { setGuardandoAusencia(false); }
+  };
+
+  const borrarAusencia = (id, fecha, nombreTrabajador) => {
+      pedirConfirmacion(
+          'Quitar ausencia',
+          `¿Quitar la ausencia de ${nombreTrabajador || 'este trabajador'} del ${fecha}?`,
+          async () => {
+              try {
+                  await deleteDoc(doc(db, 'ausencias', id));
+                  await refrescarNominaFase1();
+                  mostrarToast('Ausencia quitada.');
+              } catch (error) {
+                  console.error(error);
+                  mostrarToast(`No se pudo quitar: ${error?.message || 'error desconocido'}`, 'error');
+              }
+          });
+  };
 
   const crearCuadrilla = async (nombre) => {
       await addDoc(collection(db, 'cuadrillas'), { nombre, operarios: [], operarioEmails: [], papelera: false });
@@ -900,7 +1074,7 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
           {categoriaActiva === 'almacen' && ( <><button onClick={()=>setPestañaActiva('almacen')} style={subMenuBtnStyle(pestañaActiva === 'almacen')}>Inventario</button><button onClick={()=>setPestañaActiva('acopios')} style={subMenuBtnStyle(pestañaActiva === 'acopios')}>Acopios por Obra</button></> )}
           {categoriaActiva === 'proyectos' && ( <><button onClick={()=>setPestañaActiva('obras')} style={subMenuBtnStyle(pestañaActiva === 'obras')}>Gestión de Hoteles / Obras</button><button onClick={()=>setPestañaActiva('resumen')} style={subMenuBtnStyle(pestañaActiva === 'resumen')}>Métricas y Dashboard</button></> )}
           {categoriaActiva === 'documentos' && ( <><button onClick={()=>setPestañaActiva('partes')} style={subMenuBtnStyle(pestañaActiva === 'partes')}>Albaranes Históricos</button><button onClick={()=>setPestañaActiva('certificaciones')} style={subMenuBtnStyle(pestañaActiva === 'certificaciones')}>Certificaciones Mensuales</button><button onClick={()=>setPestañaActiva('facturacion')} style={subMenuBtnStyle(pestañaActiva === 'facturacion')}>Generar Factura</button></> )}
-          {categoriaActiva === 'personal' && ( <><button onClick={()=>setPestañaActiva('trabajadores')} style={subMenuBtnStyle(pestañaActiva === 'trabajadores')}>Plantilla Activa</button>{veNominas && (<button onClick={()=>setPestañaActiva('horas')} style={subMenuBtnStyle(pestañaActiva === 'horas')}>Control de Nóminas</button>)}</> )}
+          {categoriaActiva === 'personal' && ( <><button onClick={()=>setPestañaActiva('trabajadores')} style={subMenuBtnStyle(pestañaActiva === 'trabajadores')}>Plantilla Activa</button>{veNominas && (<button onClick={()=>setPestañaActiva('horas')} style={subMenuBtnStyle(pestañaActiva === 'horas')}>Control de Nóminas</button>)}{veNominas && (<button onClick={()=>setPestañaActiva('ausencias')} style={subMenuBtnStyle(pestañaActiva === 'ausencias')}>Ausencias</button>)}{veNominas && (<button onClick={()=>setPestañaActiva('categorias')} style={subMenuBtnStyle(pestañaActiva === 'categorias')}>Categorías</button>)}</> )}
           {categoriaActiva === 'sistema' && ( <><button onClick={()=>setPestañaActiva('papelera')} style={subMenuBtnStyle(pestañaActiva === 'papelera')}>Papelera de Reciclaje</button></> )}
       </div>
 
@@ -911,7 +1085,7 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
       {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} unidadesPropuestas={unidadesPropuestas} unidadesAConfirmar={unidadesAConfirmar} alternarUnidad={alternarUnidad} alternarTodasLasUnidades={alternarTodasLasUnidades} /> )}
       {pestañaActiva === 'resumen' && ( <ResumenMetricas partesDeHoy={partesDeHoy} totalHorasHoy={totalHorasHoy} trabajadoresHoy={trabajadoresHoy} porcentajeGlobal={porcentajeGlobal} /> )}
       {pestañaActiva === 'obras' && ( <GestionProyectos blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevaObra={nuevaObra} setNuevaObra={setNuevaObra} numPlantas={numPlantas} setNumPlantas={setNumPlantas} configHabitaciones={configHabitaciones} setConfigHabitaciones={setConfigHabitaciones} generarHotelInteligente={generarHotelInteligente} obrasList={obrasActivas} obraActiva={obraActiva} setObraActiva={setObraActiva} borrarObra={borrarObra} obtenerEstadisticasHotel={obtenerEstadisticasHotel} marcarTareaHotel={marcarTareaHotel} /> )}
-      {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarPermisoTrabajador={cambiarPermisoTrabajador} cambiandoPermiso={cambiandoPermiso} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} /> )}
+      {pestañaActiva === 'trabajadores' && ( <PlantillaPersonal cambiarPermisoTrabajador={cambiarPermisoTrabajador} cambiandoPermiso={cambiandoPermiso} blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} nuevoTrabajadorNombre={nuevoTrabajadorNombre} setNuevoTrabajadorNombre={setNuevoTrabajadorNombre} nuevoTrabajadorEmail={nuevoTrabajadorEmail} setNuevoTrabajadorEmail={setNuevoTrabajadorEmail} nuevoTrabajadorPass={nuevoTrabajadorPass} setNuevoTrabajadorPass={setNuevoTrabajadorPass} registrarTrabajador={registrarTrabajador} trabajadoresList={trabajadoresActivos} editandoTrabId={editandoTrabId} trabEditado={trabEditado} setTrabEditado={setTrabEditado} guardarEdicionTrabajador={guardarEdicionTrabajador} enviarResetPass={enviarResetPass} setEditandoTrabId={setEditandoTrabId} iniciarEdicionTrabajador={iniciarEdicionTrabajador} borrarTrabajador={borrarTrabajador} veNominas={veNominas} categoriasList={categorias} asignarCategoria={asignarCategoria} /> )}
 {pestañaActiva === 'horas' && veNominas && ( <ControlNominas trabajadoresList={trabajadoresActivos} trabajadoresTodos={trabajadoresList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} pagoHoraNormal={pagoHoraNormal} setPagoHoraNormal={setPagoHoraNormal} pagoHoraExtra={pagoHoraExtra} setPagoHoraExtra={setPagoHoraExtra} pedirConfirmacion={pedirConfirmacion} mostrarToast={mostrarToast} /> )}      {pestañaActiva === 'almacen' && ( <InventarioAlmacen blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} inputStyle={inputStyle} exportarAlmacenExcel={exportarAlmacenExcel} nuevoMatNombre={nuevoMatNombre} setNuevoMatNombre={setNuevoMatNombre} materialesList={materialesList} nuevoMatStock={nuevoMatStock} setNuevoMatStock={setNuevoMatStock} agregarMaterial={agregarMaterial} filtroMateriales={filtroMateriales} setFiltroMateriales={setFiltroMateriales} ordenMateriales={ordenMateriales} setOrdenMateriales={setOrdenMateriales} materialesCoincidentes={materialesCoincidentes} editandoMatId={editandoMatId} matEditado={matEditado} setMatEditado={setMatEditado} guardarEdicionMat={guardarEdicionMat} setEditandoMatId={setEditandoMatId} iniciarEdicionMat={iniciarEdicionMat} borrarMaterial={borrarMaterial} /> )}
       {pestañaActiva === 'partes' && ( 
           <HistorialAlbaranes 
@@ -931,6 +1105,31 @@ export default function PanelOficina({ cambiarVista, veNominas = false }) {
       {pestañaActiva === 'facturacion' && ( <EmisionFacturas blockStyle={blockStyle} labelStyle={labelStyle} inputStyle={inputStyle} btnBlackStyle={btnBlackStyle} modoFacturacion={modoFacturacion} setModoFacturacion={setModoFacturacion} setItemsAFacturar={setItemsAFacturar} facturaCliente={facturaCliente} setFacturaCliente={setFacturaCliente} facTarifaHora={facTarifaHora} setFacTarifaHora={setFacTarifaHora} facImporteMateriales={facImporteMateriales} setFacImporteMateriales={setFacImporteMateriales} partesHistorial={partesHistorial} certificacionesList={certificacionesActivas} itemsAFacturar={itemsAFacturar} toggleItemFacturacion={toggleItemFacturacion} generarPDFFactura={generarPDFFactura} facturasList={facturasList} borrarFactura={borrarFactura} /> )}
       {pestañaActiva === 'presupuestos' && ( <PresupuestosOfertas inventario={materialesList} blockStyle={blockStyle} btnBlackStyle={btnBlackStyle} labelStyle={labelStyle} inputStyle={inputStyle} /> )}
       {pestañaActiva === 'papelera' && ( <PapeleraReciclaje blockStyle={blockStyle} partesPapelera={partesPapelera} certificacionesPapelera={certificacionesPapelera} trabajadoresPapelera={trabajadoresPapelera} obrasPapelera={obrasPapelera} restaurarElemento={restaurarElemento} destruirElementoFisico={destruirElementoFisico} /> )}
+
+      {pestañaActiva === 'ausencias' && veNominas && (
+          <RegistroAusencias
+              blockStyle={blockStyle}
+              trabajadoresList={trabajadoresActivos}
+              ausenciasList={ausencias}
+              trabajadorAusencias={trabajadorAusencias}
+              setTrabajadorAusencias={setTrabajadorAusencias}
+              crearAusencia={crearAusencia}
+              borrarAusencia={borrarAusencia}
+              guardandoAusencia={guardandoAusencia}
+          />
+      )}
+
+      {pestañaActiva === 'categorias' && veNominas && (
+          <CategoriasProfesionales
+              blockStyle={blockStyle}
+              categoriasList={categorias}
+              trabajadoresList={trabajadoresActivos}
+              crearCategoria={crearCategoria}
+              editarCategoria={editarCategoria}
+              borrarCategoria={borrarCategoria}
+              guardandoCategoria={guardandoCategoria}
+          />
+      )}
 
     </div>
   );
