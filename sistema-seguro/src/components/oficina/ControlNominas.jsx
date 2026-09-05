@@ -41,9 +41,20 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
   // dentro de un then/catch. Así el "cargando" es un valor derivado en vez de un
   // setState síncrono dentro del efecto, y una respuesta que llegue tarde tras
   // cambiar de mes no puede pintar los datos del mes anterior.
-  const [agregado, setAgregado] = useState({ periodo: null, resumen: [], albaranes: 0, error: false });
-  const [cierre, setCierre] = useState({ periodo: null, lista: [], vigente: null, lineas: [], error: false });
+  const [agregado, setAgregado] = useState({ periodo: null, resumen: [], albaranes: 0, error: false, sinPermiso: false });
+  const [cierre, setCierre] = useState({ periodo: null, lista: [], vigente: null, lineas: [], error: false, sinPermiso: false });
   const [cerrando, setCerrando] = useState(false);
+
+  /**
+   * ¿El fallo es que le han retirado el permiso, o es otra cosa?
+   *
+   * Importa distinguirlo: «no se pudo leer» invita a reintentar, y aquí reintentar no
+   * va a servir de nada. El claim del token puede seguir diciendo que sí durante un
+   * rato —un claim no se puede desactivar a media vida— mientras la regla ya lee
+   * roles/{uid} en vivo y deniega. La pantalla tiene que contar eso, no un error
+   * genérico que haga pensar en un fallo de red.
+   */
+  const esPermisoDenegado = (error) => error?.code === 'permission-denied';
 
   const alDia = agregado.periodo === periodo;
   const horasTrabajadores = alDia ? agregado.resumen : [];
@@ -69,11 +80,11 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
       const { inicio, fin } = limitesDelMes(periodo);
       agregarHorasExtraDelPeriodo(db, inicio, fin)
           .then((r) => {
-              if (!cancelado) setAgregado({ periodo, resumen: r.resumen, albaranes: r.albaranesComputados, error: false });
+              if (!cancelado) setAgregado({ periodo, resumen: r.resumen, albaranes: r.albaranesComputados, error: false, sinPermiso: false });
           })
           .catch((error) => {
               console.error('No se pudieron agregar las horas extra del periodo', error);
-              if (!cancelado) setAgregado({ periodo, resumen: [], albaranes: 0, error: true });
+              if (!cancelado) setAgregado({ periodo, resumen: [], albaranes: 0, error: true, sinPermiso: esPermisoDenegado(error) });
           });
       return () => { cancelado = true; };
   }, [periodo]);
@@ -90,7 +101,7 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
       const lineas = cabecera
           ? (await getDocs(collection(db, 'nominas', cabecera.id, 'lineas'))).docs.map((d) => ({ id: d.id, ...d.data() }))
           : [];
-      return { periodo: mes, lista, vigente: cabecera, lineas, error: false };
+      return { periodo: mes, lista, vigente: cabecera, lineas, error: false, sinPermiso: false };
   }, []);
 
   useEffect(() => {
@@ -100,7 +111,7 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
           .then((estado) => { if (!cancelado) setCierre(estado); })
           .catch((error) => {
               console.error('No se pudieron leer los cierres del periodo', error);
-              if (!cancelado) setCierre({ periodo, lista: [], vigente: null, lineas: [], error: true });
+              if (!cancelado) setCierre({ periodo, lista: [], vigente: null, lineas: [], error: true, sinPermiso: esPermisoDenegado(error) });
           });
       return () => { cancelado = true; };
   }, [periodo, leerCierres]);
@@ -274,18 +285,30 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
                   // "Permiso denegado" no explicaría nada de lo que pasó.
                   console.error('No se pudo cerrar el periodo', error);
                   let ocupado = false;
+                  let lecturaDenegada = false;
                   try {
                       const snap = await getDocs(query(collection(db, 'nominas'), where('periodo', '==', periodo)));
                       ocupado = snap.docs.some((d) => d.id === cierreId);
-                  } catch { /* si tampoco se puede leer, se queda el mensaje genérico */ }
+                  } catch (fallo) {
+                      // Si tampoco se puede LEER, el motivo no es que el id esté ocupado:
+                      // es que ya no hay permiso. Distinguirlo evita echarle la culpa a un
+                      // compañero que no ha hecho nada.
+                      lecturaDenegada = esPermisoDenegado(fallo);
+                  }
 
                   mostrarToast(
-                      ocupado
-                          ? 'Otro admin cerró este periodo mientras tanto, recarga y revisa.'
-                          : `No se pudo cerrar la nómina: ${error?.message || 'error desconocido'}`,
+                      lecturaDenegada || esPermisoDenegado(error)
+                          ? 'Te han retirado el permiso para ver nóminas. La liquidación NO se ha cerrado. Cierra sesión y vuelve a entrar.'
+                          : ocupado
+                              ? 'Otro admin cerró este periodo mientras tanto, recarga y revisa.'
+                              : `No se pudo cerrar la nómina: ${error?.message || 'error desconocido'}`,
                       'error'
                   );
-                  await leerCierres(periodo).then(setCierre).catch(() => {});
+                  await leerCierres(periodo).then(setCierre).catch((fallo) => {
+                      // Deja constancia en el estado para que el render corte con el
+                      // aviso de permiso en vez de volver a pintar la tabla.
+                      setCierre({ periodo, lista: [], vigente: null, lineas: [], error: true, sinPermiso: esPermisoDenegado(fallo) });
+                  });
               } finally {
                   setCerrando(false);
               }
@@ -339,6 +362,39 @@ export default function ControlNominas({ blockStyle, btnBlackStyle, labelStyle, 
       background: 'none', border: 'none', cursor: 'pointer', padding: 0,
       color: color.aviso, display: 'inline-flex', alignItems: 'center'
   };
+
+  // ---- PERMISO RETIRADO EN CALIENTE ---------------------------------------
+  //
+  // Se puede llegar aquí con la pestaña ya abierta y el permiso recién retirado. La
+  // pestaña sigue a la vista porque se pinta con el claim del token, y un claim no se
+  // puede desactivar a media vida; pero la regla lee roles/{uid} en vivo y ya deniega.
+  //
+  // Sin esto, la pantalla enseñaría la tabla entera con ceros y un aviso de «no se
+  // pudieron leer las horas extra»: parecería que nadie hizo horas extra ese mes, que es
+  // peor que un error. Se corta antes de pintar nada calculable.
+  if (agregado.sinPermiso || cierre.sinPermiso) {
+      return (
+          <div style={blockStyle}>
+              <h3 style={{ margin: '0 0 25px 0', fontSize: '18px', fontWeight: '300', letterSpacing: '2px', textTransform: 'uppercase' }}>
+                  Cálculo de Nóminas y Horas
+              </h3>
+              <div style={{ padding: '20px', border: `1px solid ${color.aviso}`, backgroundColor: color.avisoSuave, display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                  <Lock size={18} color={color.aviso} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div style={{ fontSize: '12px', color: color.aviso, lineHeight: '1.6' }}>
+                      <strong style={{ display: 'block', marginBottom: '6px', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                          Ya no tienes permiso para ver las nóminas
+                      </strong>
+                      Alguien te ha retirado el acceso mientras tenías esta pantalla abierta, así que
+                      no se puede mostrar nada: ni las horas extra ni los importes.
+                      <span style={{ display: 'block', marginTop: '8px', color: color.textoSuave }}>
+                          Cierra sesión y vuelve a entrar para que la aplicación se ponga al día.
+                          Si crees que es un error, habla con quien lleve los permisos.
+                      </span>
+                  </div>
+              </div>
+          </div>
+      );
+  }
 
   return (
       <div style={blockStyle}>

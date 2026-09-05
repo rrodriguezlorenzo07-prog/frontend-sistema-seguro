@@ -190,19 +190,61 @@ async function main() {
     await assertSucceeds(getDocs(collection(operativo, 'facturas')));
   });
 
-  // ======================================== el permiso también viaja en el claim
-  titulo('El claim del token vale igual que roles/{uid}');
+  // ================== veNominas SOLO sale de roles/{uid}, nunca del claim
+  titulo('El claim NO concede veNominas: solo roles/{uid}');
 
-  await comprobar('con claim admin+veNominas, entra a las nóminas', async () => {
-    await assertSucceeds(getDoc(doc(porClaim, 'nominas/2026-08-v1')));
-    await assertSucceeds(getDoc(doc(porClaim, 'validaciones/p1')));
+  await comprobar('un claim veNominas=true SIN documento en roles/ NO abre nada', async () => {
+    // Es la diferencia deliberada con esAdmin(). Un claim viaja dentro del token y no se
+    // puede desactivar a media vida: revokeRefreshTokens() impide emitir tokens nuevos
+    // pero no invalida el ya emitido (medido contra producción el 05/09/2026). Si el
+    // claim contara, retirar el permiso tardaría hasta una hora en surtir efecto.
+    await assertFails(getDoc(doc(porClaim, 'nominas/2026-08-v1')));
+    await assertFails(getDoc(doc(porClaim, 'validaciones/p1')));
   });
-  await comprobar('con claim admin pero SIN veNominas, no entra', async () => {
+  await comprobar('pero ese mismo claim SÍ le hace admin operativo', async () => {
+    // esAdmin() no se ha tocado: sigue aceptando las dos fuentes, porque storage.rules
+    // no puede resolver roles/{uid} y necesita el claim.
+    await assertSucceeds(setDoc(doc(porClaim, 'obras/o4'), { nombre: 'Hotel Norte' }));
+  });
+  await comprobar('con claim admin pero SIN veNominas, tampoco entra', async () => {
     await assertFails(getDoc(doc(claimSinNominas, 'nominas/2026-08-v1')));
     await assertFails(getDoc(doc(claimSinNominas, 'validaciones/p1')));
   });
   await comprobar('y ese mismo sigue siendo admin para lo operativo', async () => {
     await assertSucceeds(setDoc(doc(claimSinNominas, 'obras/o3'), { nombre: 'Hotel Mar' }));
+  });
+  await comprobar('admin por CLAIM + veNominas por roles/ sí entra (las fuentes se mezclan)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'roles/uid-claim'), { veNominas: true });
+    });
+    await assertSucceeds(getDoc(doc(porClaim, 'nominas/2026-08-v1')));
+  });
+
+  // ============================ LO QUE JUSTIFICA EL CAMBIO: efecto inmediato
+  titulo('Retirar el permiso surte efecto en la lectura siguiente');
+
+  await comprobar('quitar veNominas de roles/ deniega YA, sin renovar el token', async () => {
+    // El contexto —y por tanto el token— es el mismo objeto durante toda esta prueba.
+    // Lo único que cambia es el documento, y la regla lo lee vivo en cada evaluación.
+    await assertSucceeds(getDoc(doc(completo, 'nominas/2026-08-v1')));
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'roles/uid-completo'), { admin: true, veNominas: false });
+    });
+
+    await assertFails(getDoc(doc(completo, 'nominas/2026-08-v1')));
+    await assertFails(getDoc(doc(completo, 'validaciones/p1')));
+  });
+
+  await comprobar('y devolvérselo lo restaura igual de rápido', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'roles/uid-completo'), { admin: true, veNominas: true });
+    });
+    await assertSucceeds(getDoc(doc(completo, 'nominas/2026-08-v1')));
+  });
+
+  await comprobar('mientras tanto NO ha perdido lo operativo', async () => {
+    await assertSucceeds(setDoc(doc(completo, 'obras/o5'), { nombre: 'Hotel Sur' }));
   });
 
   await testEnv.cleanup();

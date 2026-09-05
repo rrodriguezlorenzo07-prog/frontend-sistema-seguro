@@ -43,26 +43,40 @@ service cloud.firestore {
       );
     }
 
-    // Permiso SEPARADO para ver lo que se paga. Calca la estructura de esAdmin() —
-    // claim del token o roles/{uid}— y es INDEPENDIENTE de él: administrar la obra
-    // (validar partes, planificar, gestionar catálogos) no implica ver nóminas, y
-    // varias personas pueden tener este permiso además del admin original.
+    // Permiso SEPARADO para ver lo que se paga. INDEPENDIENTE de esAdmin(): administrar
+    // la obra (validar partes, planificar, catálogos) no implica ver nóminas, y varias
+    // personas pueden tener este permiso además del admin original. Donde hace falta
+    // separar se exigen los dos: `esAdmin() && veNominas()`.
     //
-    // esAdmin() NO SE TOCA a propósito: cuelgan de ella quince bloques y cualquier
-    // cambio se propagaría a todos a la vez. Donde hace falta separar, se exigen las
-    // dos: `esAdmin() && veNominas()`. Quien ve nóminas es también gente de oficina.
+    // ⚠️ SOLO MIRA roles/{uid}, NO EL CLAIM DEL TOKEN. Es deliberado y es la diferencia
+    // con esAdmin().
+    //
+    // Un claim viaja dentro del token y no se puede desactivar a media vida:
+    // `revokeRefreshTokens()` impide emitir tokens NUEVOS, pero no invalida el que ya
+    // está emitido. Medido contra producción el 05/09/2026, con un usuario sintético y
+    // peticiones HTTPS independientes a la API REST: tras revocar, el mismo ID token
+    // seguía leyendo `nominas/` con HTTP 200 en t+0, t+15 s, t+45 s y t+90 s, mientras
+    // que forzar la renovación fallaba con `auth/user-token-expired`. Es decir: las
+    // reglas no consultan la lista de revocación. Retirar el permiso habría tardado
+    // hasta una hora en surtir efecto.
+    //
+    // Un get() lee el dato VIVO en cada evaluación, así que retirar el permiso surte
+    // efecto en la lectura siguiente.
+    //
+    // POR QUÉ ESTO NO VALE PARA esAdmin(). Aquel tiene que seguir aceptando el claim
+    // porque `storage.rules` no puede resolver `roles/{uid}`: se intentó el 30/08/2026 y
+    // la llamada entre servicios funciona en el emulador pero NO en producción. Esa
+    // restricción no aplica aquí, porque `veNominas` no se usa en Storage — solo en
+    // `validaciones/` y `nominas/`, dentro de Firestore, donde el get() sí funciona.
+    //
+    // COSTE: un acceso a documento por evaluación, muy por debajo del tope de 10.
     //
     // Un permiso que no está escrito vale false: `.get('veNominas', false)`. Por eso el
-    // despliegue va DESPUÉS del backfill que se lo pone a los administradores actuales
-    // — al revés, se quedarían todos fuera de la nómina el mismo día.
+    // backfill que se lo puso a los administradores actuales fue ANTES de desplegar.
     function veNominas() {
-      return autenticado() && (
-        request.auth.token.get('veNominas', false) == true ||
-        (
-          exists(/databases/$(database)/documents/roles/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.get('veNominas', false) == true
-        )
-      );
+      return autenticado()
+             && exists(/databases/$(database)/documents/roles/$(request.auth.uid))
+             && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.get('veNominas', false) == true;
     }
 
     // Campos que cambian entre el documento actual y el entrante
