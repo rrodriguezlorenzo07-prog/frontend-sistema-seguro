@@ -385,7 +385,20 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   const { aviso: avisoJornada } = contrasteDeJornada(horasTaller, horasCalle);
 
   const btnStyle = (activo) => ({
-      flex: 1, padding: espacio.md, minHeight: objetivo.amplio, borderRadius: radio.sutil, backgroundColor: activo ? color.petroleo : color.superficie, color: activo ? color.textoSobreOscuro : color.textoSuave,
+      // `flex: '1 1 auto'` CON ancho mínimo, no `flex: 1` a secas.
+      //
+      // Un flex item puede encogerse por debajo del ancho de su contenido, y con dos
+      // pestañas eso no se notaba. Al entrar la tercera —«Material», de la Pieza 4— el
+      // reparto dejó a cada una sin sitio y una se aplastó hasta quedar solo el icono,
+      // solapándose con las de al lado.
+      //
+      // `minWidth: fit-content` y no un número: garantiza que una pestaña nunca baje
+      // del ancho de su propio contenido, sea cual sea el texto que se le ponga mañana.
+      // Con eso y `whiteSpace: nowrap`, lo que no cabe pasa a la fila siguiente en vez
+      // de comprimirse.
+      flex: '1 1 auto', minWidth: 'fit-content', whiteSpace: 'nowrap',
+      padding: `${espacio.sm} ${espacio.md}`, minHeight: objetivo.amplio, borderRadius: radio.sutil,
+      backgroundColor: activo ? color.petroleo : color.superficie, color: activo ? color.textoSobreOscuro : color.textoSuave,
       border: `1px solid ${activo ? color.petroleo : color.linea}`, fontSize: texto.menor, fontWeight: peso.fuerte, letterSpacing: interletra.etiqueta, textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: espacio.xs
   });
 
@@ -394,7 +407,11 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
       
       {/* NAVEGACIÓN SUPERIOR */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: espacio.lg, borderBottom: `1px solid ${color.linea}`, paddingBottom: espacio.md, flexWrap: 'wrap', gap: espacio.sm }}>
-        <div style={{ display: 'flex', gap: '10px', flex: 1, minWidth: '200px' }}>
+        {/* El grupo de pestañas se envuelve por dentro, y su base de 320px hace que
+            baje a una fila propia antes de comprimir nada: 320 es lo que ocupan las tres
+            pestañas con sus separaciones. Antes tenía minWidth 200px, que le permitía
+            encogerse por debajo de lo que cabe y era la otra mitad del solape. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: espacio.xs, flex: '1 1 320px' }}>
             <button onClick={() => { setVistaMisPartes(false); setVistaAcopios(false); }} style={btnStyle(!vistaMisPartes && !vistaAcopios)}><FileText size={16} /> Parte</button>
             {acopios.length > 0 && (
                 <button onClick={() => { setVistaMisPartes(false); setVistaAcopios(true); }} style={btnStyle(vistaAcopios)}>
