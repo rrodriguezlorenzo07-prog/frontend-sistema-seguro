@@ -11,7 +11,7 @@ import Boton from '../ui/Boton';
 import Insignia from '../ui/Insignia';
 import Tarjeta from '../ui/Tarjeta';
 import Etiqueta from '../ui/Etiqueta';
-import { destinoDeAsignacion, normalizarHorasReportadas, contrasteDeJornada, ordenarPorHora } from '../logica/cuadrantes';
+import { destinoDeAsignacion, normalizarHorasReportadas, contrasteDeJornada, ordenarPorHora, cuadrillasDelOperario } from '../logica/cuadrantes';
 import { previsualizarPropuesta, unidadesDesdeLinea } from '../logica/unidades';
 import { cambioDeEstado } from '../logica/acopios';
 import AcopiosDeMiObra from './AcopiosDeMiObra';
@@ -75,37 +75,59 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   // Antes se volvían a descargar enteros cada vez que se alternaba Parte / Historial.
   useEffect(() => {
     const cargarCatalogos = async () => {
-      try {
-        const correo = usuario.email.toLowerCase().trim();
-        const hoy = new Date().toISOString().slice(0, 10);
+      const correo = usuario.email.toLowerCase().trim();
+      const hoy = new Date().toISOString().slice(0, 10);
 
-        // El filtro por operarioEmails NO es opcional: la regla de cuadrantes exige
-        // que la consulta lo lleve, porque es lo que impide que un operario liste las
-        // asignaciones de los demás. Sin él la consulta no devuelve menos resultados:
-        // falla entera. El índice compuesto que sostiene este orden ya está desplegado.
-        const [resTrab, resObras, resInv, resAsig] = await Promise.all([
+      // Los catálogos van por su cuenta. Antes compartían un Promise.all con la
+      // consulta de asignaciones, y un fallo del cuadrante se llevaba por delante
+      // obras e inventario: el comentario de más abajo prometía una caída a la
+      // creación libre que en realidad dejaba el formulario sin nada que elegir.
+      try {
+        const [resTrab, resObras, resInv] = await Promise.all([
           getDocs(query(collection(db, 'trabajadores'), where("email", "==", correo))),
           getDocs(collection(db, 'obras')),
-          getDocs(collection(db, 'inventario')),
-          getDocs(query(
-            collection(db, 'cuadrantes'),
-            where('operarioEmails', 'array-contains', correo),
-            where('fecha', '==', hoy),
-            orderBy('horaInicio')
-          ))
+          getDocs(collection(db, 'inventario'))
         ]);
         if (!resTrab.empty) { setNombreOficial(resTrab.docs[0].data().nombre); setTrabajadorId(resTrab.docs[0].id); }
         setObrasList(resObras.docs.map(d => ({ id: d.id, ...d.data() })));
         setInventario(resInv.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (error) {
+        console.error("No se pudieron cargar los catálogos:", error);
+      }
 
-        const delDia = ordenarPorHora(resAsig.docs.map(d => ({ id: d.id, ...d.data() })));
+      // LA ASIGNACIÓN DE HOY, EN DOS PASOS: primero la cuadrilla, luego sus bloques.
+      //
+      // La regla de `cuadrantes` resuelve la cuadrilla VIVA con un get() por ruta, y
+      // para que esa ruta sea constante exige que la consulta fije `cuadrillaId` con
+      // `==` a un ÚNICO valor. Sin ese filtro la consulta no devuelve menos
+      // resultados: FALLA ENTERA. Por eso hay una consulta POR CUADRILLA en vez de un
+      // `in` con todas — un `in` de dos valores también falla, está medido.
+      //
+      // Estar en dos cuadrillas es raro, pero cuando pasa cuesta una consulta más y no
+      // una asignación perdida.
+      try {
+        const resCuadrillas = await getDocs(collection(db, 'cuadrillas'));
+        const misCuadrillas = cuadrillasDelOperario(
+          resCuadrillas.docs.map(d => ({ id: d.id, ...d.data() })), correo
+        );
+
+        const porCuadrilla = await Promise.all(misCuadrillas.map((cuadrillaId) => getDocs(query(
+          collection(db, 'cuadrantes'),
+          where('cuadrillaId', '==', cuadrillaId),
+          where('fecha', '==', hoy),
+          orderBy('horaInicio')
+        ))));
+
+        const delDia = ordenarPorHora(
+          porCuadrilla.flatMap((snap) => snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        );
         setAsignaciones(delDia);
         // Con una sola asignación no se hace elegir: se entra directo a su parte.
         if (delDia.length === 1) setAsignacionElegida(delDia[0]);
       } catch (error) {
         // Si falla la consulta de cuadrantes no se deja al operario sin poder trabajar:
         // se cae a la creación libre, que es la vía que existía antes de todo esto.
-        console.error("Error:", error);
+        console.error("No se pudo leer el cuadrante:", error);
       } finally {
         setCargandoAsignaciones(false);
       }

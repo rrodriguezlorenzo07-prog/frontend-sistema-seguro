@@ -148,10 +148,13 @@ export function filasDelTablero(cuadrillas, asignaciones) {
 /**
  * El array plano de correos que exigen las reglas de Firestore.
  *
- * Las reglas no saben recorrer un array de objetos, así que `operarios` no les sirve y
- * hace falta esta copia redundante. Se normaliza a minúsculas porque `correo()` en las
- * reglas devuelve el token ya en minúsculas, y una mayúscula suelta dejaría al operario
- * sin ver su propia asignación.
+ * VIVE EN LA CUADRILLA, no en la asignación. Las reglas no saben recorrer un array de
+ * objetos, así que `operarios` no les sirve y hace falta esta copia plana al lado. Se
+ * normaliza a minúsculas porque `correo()` en las reglas devuelve el token ya en
+ * minúsculas, y una mayúscula suelta dejaría al operario sin ver su propia asignación.
+ *
+ * Hasta la corrección de la referencia viva esto se copiaba TAMBIÉN dentro de cada
+ * asignación, y esa copia era el bug: no se enteraba de las altas ni de las bajas.
  *
  * @param {Array<{email?: string}>} operarios
  * @returns {string[]}
@@ -161,6 +164,36 @@ export function correosDeCuadrilla(operarios) {
         .map((o) => String(o?.email || '').toLowerCase().trim())
         .filter((c) => c.length > 0);
     return [...new Set(correos)];
+}
+
+/**
+ * Los ids de las cuadrillas a las que pertenece un correo.
+ *
+ * Se mira `operarioEmails` cuando está y se cae a `operarios[].email` cuando no: las
+ * cuadrillas creadas antes de la referencia viva no tienen el array plano hasta que
+ * alguien las edita, y un operario no debe quedarse sin ver su asignación por eso.
+ *
+ * DEVUELVE UNA LISTA, no un id. Una persona puede estar en varias cuadrillas, y cada
+ * una necesita SU PROPIA consulta: las reglas exigen que `cuadrillaId` vaya fijado con
+ * `==` a un único valor, y un `in` con dos valores falla (medido en el emulador).
+ *
+ * @param {Array<{id?: string, operarioEmails?: string[], operarios?: Array<{email?: string}>, papelera?: boolean}>} cuadrillas
+ * @param {string} correo
+ * @returns {string[]}
+ */
+export function cuadrillasDelOperario(cuadrillas, correo) {
+    const buscado = String(correo || '').toLowerCase().trim();
+    if (!buscado) return [];
+    return (cuadrillas || [])
+        .filter((c) => {
+            if (c?.papelera) return false;
+            const planos = Array.isArray(c?.operarioEmails)
+                ? c.operarioEmails.map((e) => String(e || '').toLowerCase().trim())
+                : correosDeCuadrilla(c?.operarios);
+            return planos.includes(buscado);
+        })
+        .map((c) => c.id)
+        .filter((id) => typeof id === 'string' && id.length > 0);
 }
 
 /**
@@ -194,8 +227,10 @@ export function construirAsignacion({ fecha, horaInicio, horaFin, cuadrilla, veh
         horaFin,
         cuadrillaId: cuadrilla.id,
         cuadrillaNombre: cuadrilla.nombre ?? '',
+        // `operarios` es una ETIQUETA: quién estaba previsto el día que se planificó.
+        // No gobierna ningún permiso. Quién puede ver esta asignación lo decide la
+        // cuadrilla viva, resuelta con get() desde las reglas.
         operarios,
-        operarioEmails: correosDeCuadrilla(operarios),
         vehiculoId: vehiculo?.id ?? null,
         vehiculoNombre: vehiculo?.nombre ?? null,
         destinoTipo,

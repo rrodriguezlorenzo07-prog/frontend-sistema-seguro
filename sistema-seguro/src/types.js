@@ -200,10 +200,18 @@
  * se compone DESPUÉS del trabajo y lleva horas extra; esto se compone ANTES y no sabe
  * nada de horas.
  *
+ * `operarioEmails` duplica en plano los correos de `operarios`. Es redundante a
+ * propósito: las reglas de Firestore no saben proyectar un campo dentro de un array de
+ * objetos, y de este array cuelga quién puede LEER las asignaciones de la cuadrilla —
+ * las reglas de `cuadrantes` lo resuelven en vivo con un get() por ruta. Lo deriva
+ * `actualizarOperariosCuadrilla`, que es el único camino por el que pasan altas y bajas.
+ *
  * @typedef {Object} Cuadrilla
  * @property {string} [id]
  * @property {string} nombre
  * @property {Array<{trabajadorId: string|null, nombre: string, email: string}>} operarios
+ * @property {string[]} [operarioEmails] plano, para las reglas; ausente en las anteriores
+ *                                       a la referencia viva hasta que se editan
  * @property {boolean} [papelera]
  */
 
@@ -220,9 +228,13 @@
  * Una asignación del cuadrante: una cuadrilla, en una franja, con un destino.
  * Vive en `cuadrantes/{id}`. UN DOCUMENTO POR ASIGNACIÓN, no uno por día.
  *
- * `operarioEmails` duplica los correos que ya están en `operarios`. Es redundante a
- * propósito: las reglas de Firestore no saben recorrer un array de objetos, y ese array
- * plano es lo único que permite que un operario liste su asignación sin ver las demás.
+ * NO LLEVA `operarioEmails`. Quién puede leerla lo decide la CUADRILLA VIVA, que las
+ * reglas resuelven con get() sobre `cuadrillas/{cuadrillaId}`. La copia que había aquí
+ * se escribía al planificar y no se enteraba de las altas ni de las bajas posteriores:
+ * un integrante nuevo no veía el trabajo y uno dado de baja seguía viéndolo.
+ *
+ * `operarios` se queda como ETIQUETA —quién estaba previsto ese día— y no gobierna
+ * ningún permiso.
  *
  * @typedef {Object} Cuadrante
  * @property {string} [id]
@@ -232,7 +244,7 @@
  * @property {string} cuadrillaId
  * @property {string} cuadrillaNombre denormalizado
  * @property {Array<{trabajadorId: string|null, nombre: string, email: string}>} operarios
- * @property {string[]} operarioEmails el filtro de las reglas
+ *                                       etiqueta informativa, no gobierna permisos
  * @property {string|null} vehiculoId
  * @property {string|null} vehiculoNombre denormalizado
  * @property {'obra'|'taller'} destinoTipo

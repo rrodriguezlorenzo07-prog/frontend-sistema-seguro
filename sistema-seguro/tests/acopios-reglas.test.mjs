@@ -181,7 +181,7 @@ async function main() {
     });
     await assertFails(updateDoc(doc(juan, 'unidades_obra/u1'), { estado: 'confirmada' }));
   });
-  await comprobar('cuadrantes sigue exigiendo el filtro por operarioEmails', async () => {
+  await comprobar('cuadrantes sigue exigiendo el filtro por cuadrillaId', async () => {
     await assertFails(getDocs(collection(juan, 'cuadrantes')));
   });
   await comprobar('partes_de_trabajo responde como antes', async () => {

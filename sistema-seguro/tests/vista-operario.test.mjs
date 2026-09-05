@@ -51,16 +51,26 @@ function igual(actual, esperado, mensaje) {
   if (actual !== esperado) throw new Error(`${mensaje}: esperaba ${esperado}, recibí ${actual}`);
 }
 
-const asignacion = (correos, extra = {}) => ({
+/**
+ * La asignación apunta a su cuadrilla y NO lleva correos: quién puede verla lo decide
+ * la cuadrilla viva, que las reglas resuelven con get().
+ */
+const asignacion = (cuadrillaId, extra = {}) => ({
   fecha: HOY, horaInicio: '08:00', horaFin: '14:00',
-  cuadrillaId: 'c1', cuadrillaNombre: 'Cuadrilla A',
-  operarios: correos.map((email, i) => ({ trabajadorId: `t${i}`, nombre: `Op ${i}`, email })),
-  operarioEmails: correos,
+  cuadrillaId, cuadrillaNombre: 'Cuadrilla A',
+  operarios: [],
   vehiculoId: 'v1', vehiculoNombre: 'Furgoneta 1',
   destinoTipo: 'obra', obraId: 'o1', obraNombre: 'Hotel Sol',
   estado: 'planificado', parteId: null,
   creadoPor: 'oficina@empresa.com', creadoEn: Date.now(),
   ...extra
+});
+
+const cuadrillaCon = (nombre, correos) => ({
+  nombre,
+  operarios: correos.map((email, i) => ({ trabajadorId: `t${i}`, nombre: `Op ${i}`, email })),
+  operarioEmails: correos,
+  papelera: false
 });
 
 /** El payload exacto que arma ParteTrabajo.jsx, con los campos nuevos. */
@@ -84,10 +94,16 @@ const parteDe = (creador, extra = {}) => ({
   ...extra
 });
 
-/** La consulta literal de ParteTrabajo.jsx. */
-const consultaDelDia = (db, correo) => getDocs(query(
+/**
+ * La consulta literal de ParteTrabajo.jsx: por cuadrilla, no por correo.
+ *
+ * La regla exige que `cuadrillaId` vaya fijado con `==` a un único valor, porque de ahí
+ * cuelga la ruta del get() que resuelve la cuadrilla viva. Un operario en dos cuadrillas
+ * hace dos consultas; aquí cada uno está en una.
+ */
+const consultaDelDia = (db, cuadrillaId) => getDocs(query(
   collection(db, 'cuadrantes'),
-  where('operarioEmails', 'array-contains', correo),
+  where('cuadrillaId', '==', cuadrillaId),
   where('fecha', '==', HOY),
   orderBy('horaInicio')
 ));
@@ -102,16 +118,21 @@ async function main() {
 
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, 'cuadrantes/asig-solo'), asignacion([SOLO]));
+    // Una cuadrilla por operario: es de ellas de donde cuelga ahora quién ve qué.
+    await setDoc(doc(db, 'cuadrillas/c-solo'), cuadrillaCon('Cuadrilla A', [SOLO]));
+    await setDoc(doc(db, 'cuadrillas/c-doble'), cuadrillaCon('Cuadrilla A', [DOBLE]));
+    await setDoc(doc(db, 'cuadrillas/c-huerfano'), cuadrillaCon('Cuadrilla A', [HUERFANO]));
+
+    await setDoc(doc(db, 'cuadrantes/asig-solo'), asignacion('c-solo'));
     // Sembradas al revés a propósito: la consulta tiene que devolverlas ordenadas.
-    await setDoc(doc(db, 'cuadrantes/asig-doble-tarde'), asignacion([DOBLE], {
+    await setDoc(doc(db, 'cuadrantes/asig-doble-tarde'), asignacion('c-doble', {
       horaInicio: '15:00', horaFin: '19:00', destinoTipo: 'taller', obraId: null, obraNombre: null
     }));
-    await setDoc(doc(db, 'cuadrantes/asig-doble-manana'), asignacion([DOBLE], {
+    await setDoc(doc(db, 'cuadrantes/asig-doble-manana'), asignacion('c-doble', {
       horaInicio: '08:00', horaFin: '14:00', obraNombre: 'Hotel Luna', obraId: 'o2'
     }));
     // Del huérfano, pero de AYER: no debe aparecer hoy.
-    await setDoc(doc(db, 'cuadrantes/asig-vieja'), asignacion([HUERFANO], { fecha: AYER }));
+    await setDoc(doc(db, 'cuadrantes/asig-vieja'), asignacion('c-huerfano', { fecha: AYER }));
   });
 
   const solo = testEnv.authenticatedContext('uid-solo', { email: SOLO }).firestore();
@@ -123,7 +144,7 @@ async function main() {
 
   let laSuya;
   await comprobar('la consulta le devuelve exactamente una', async () => {
-    const snap = await assertSucceeds(consultaDelDia(solo, SOLO));
+    const snap = await assertSucceeds(consultaDelDia(solo, 'c-solo'));
     igual(snap.size, 1, 'asignaciones');
     laSuya = snap.docs[0].data();
   });
@@ -143,26 +164,32 @@ async function main() {
   });
 
   await comprobar('no ve la asignación de otro operario', async () => {
-    const snap = await assertSucceeds(consultaDelDia(solo, SOLO));
+    const snap = await assertSucceeds(consultaDelDia(solo, 'c-solo'));
     igual(snap.docs.some((d) => d.id.startsWith('asig-doble')), false, 'no debe ver las ajenas');
+  });
+
+  await comprobar('ni consultando la cuadrilla ajena a propósito', async () => {
+    // Lo anterior sale gratis por ser cuadrillas distintas; esto es la comprobación
+    // de verdad: pedir la ajena directamente tiene que ser denegado, no vacío.
+    await assertFails(consultaDelDia(solo, 'c-doble'));
   });
 
   // ============================================================ varias
   titulo('Operario con VARIAS: las recibe todas y ordenadas');
 
   await comprobar('la consulta le devuelve las dos', async () => {
-    const snap = await assertSucceeds(consultaDelDia(doble, DOBLE));
+    const snap = await assertSucceeds(consultaDelDia(doble, 'c-doble'));
     igual(snap.size, 2, 'asignaciones');
   });
 
   await comprobar('llegan ordenadas por hora, aunque se sembraran al revés', async () => {
-    const snap = await consultaDelDia(doble, DOBLE);
+    const snap = await consultaDelDia(doble, 'c-doble');
     const horas = snap.docs.map((d) => d.data().horaInicio);
     igual(horas.join(','), '08:00,15:00', 'orden');
   });
 
   await comprobar('distingue el destino de taller del de obra', async () => {
-    const snap = await consultaDelDia(doble, DOBLE);
+    const snap = await consultaDelDia(doble, 'c-doble');
     const tarde = snap.docs.map((d) => d.data()).find((a) => a.horaInicio === '15:00');
     igual(tarde.destinoTipo, 'taller', 'destinoTipo');
     igual(tarde.obraId, null, 'una asignación de taller no tiene obra del catálogo');
@@ -178,12 +205,12 @@ async function main() {
   titulo('Operario SIN asignación: lista vacía, pero puede crear libre');
 
   await comprobar('la consulta no falla, simplemente no devuelve nada', async () => {
-    const snap = await assertSucceeds(consultaDelDia(huerfano, HUERFANO));
+    const snap = await assertSucceeds(consultaDelDia(huerfano, 'c-huerfano'));
     igual(snap.size, 0, 'asignaciones de hoy');
   });
 
   await comprobar('la de AYER no se cuela en la de hoy', async () => {
-    const snap = await consultaDelDia(huerfano, HUERFANO);
+    const snap = await consultaDelDia(huerfano, 'c-huerfano');
     igual(snap.docs.some((d) => d.id === 'asig-vieja'), false, 'no debe aparecer');
   });
 

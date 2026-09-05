@@ -267,33 +267,55 @@ service cloud.firestore {
 
     // ------------------------------------------------------ cuadrantes diarios
     //
-    // El operario ve SU asignación y ninguna más. Las reglas no saben recorrer un
-    // array de objetos, así que la comprobación se hace contra `operarioEmails`,
-    // un array plano de cadenas que el cliente escribe junto a `operarios`.
+    // El operario ve SU asignación y ninguna más. La pertenencia se resuelve contra la
+    // CUADRILLA VIVA, no contra una copia congelada dentro de la asignación.
     //
-    // Se identifica por correo, y no por uid, para no inventar un criterio nuevo:
-    // es el mismo que usa `esSuyo()` en partes_de_trabajo.
+    // POR QUÉ SE CAMBIÓ. Antes la asignación guardaba su propio `operarioEmails`, escrito
+    // en el momento de crearla. Añadir a alguien a la cuadrilla después no le daba acceso
+    // —había que rehacer la asignación— y quitarlo no se lo retiraba: seguía viendo el
+    // trabajo hasta que alguien lo borraba a mano. Una copia de una lista que cambia deja
+    // de ser verdad en cuanto la lista cambia.
     //
-    // ⚠️ `list` con esta condición obliga a que la consulta filtre por
-    // operarioEmails: una consulta sin ese filtro no devuelve menos resultados,
-    // FALLA ENTERA. La vista del operario consulta siempre con array-contains, y
-    // el índice compuesto correspondiente está en firestore.indexes.json.
+    // El `get()` por ruta es el mismo patrón que usa esAdmin() con roles/{uid}, y va
+    // DESPUÉS de esAdmin() en el `||`: para la oficina el cortocircuito lo evita entero.
+    //
+    // Se lee de `operarioEmails` de la cuadrilla, un array PLANO de cadenas, y no de
+    // `operarios`, que es un array de objetos: las reglas no saben proyectar un campo
+    // dentro de un array de objetos.
+    //
+    // ⚠️ LA CONSULTA TIENE QUE FIJAR `cuadrillaId` CON == A UN ÚNICO VALOR.
+    // Medido en el emulador, con UN solo documento y UNA sola cuadrilla:
+    //     where('cuadrillaId','==', x)              -> pasa
+    //     where('cuadrillaId','==', x) + fecha ==   -> pasa   (y con 60 documentos también)
+    //     where('cuadrillaId','in', [x])            -> pasa
+    //     where('cuadrillaId','in', [x, y])         -> FALLA
+    //     where('fecha','==', hoy) sin cuadrillaId  -> FALLA
+    //     la colección entera                       -> FALLA
+    // No es un límite de volumen: la ruta del get() tiene que ser constante en toda la
+    // consulta. Un operario en dos cuadrillas necesita DOS consultas, una por cuadrilla.
+    // El índice que sostiene esto (cuadrillaId + fecha + horaInicio) ya estaba desplegado
+    // desde la Pieza 2, así que este cambio no necesita índices nuevos.
 
     match /cuadrantes/{asignacionId} {
 
-      function esSuya() {
+      function enLaCuadrillaViva() {
         return autenticado()
                && correo() != ''
-               && correo() in resource.data.operarioEmails;
+               && exists(/databases/$(database)/documents/cuadrillas/$(resource.data.cuadrillaId))
+               && correo() in get(/databases/$(database)/documents/cuadrillas/$(resource.data.cuadrillaId)).data.get('operarioEmails', []);
       }
 
-      allow get, list: if esAdmin() || esSuya();
+      allow get, list: if esAdmin() || enLaCuadrillaViva();
 
       // Solo oficina planifica. El operario nunca escribe aquí: cuando envíe su
       // parte será la oficina, o una función, quien marque la asignación.
+      //
+      // Ya no se exige `operarioEmails`: la asignación no lo lleva. Sí `cuadrillaId`,
+      // que es de lo que ahora cuelga el permiso de lectura — sin él la asignación no
+      // sería legible para nadie salvo la oficina.
       allow create: if esAdmin()
-                    && request.resource.data.operarioEmails is list
-                    && request.resource.data.operarioEmails.size() > 0
+                    && request.resource.data.cuadrillaId is string
+                    && request.resource.data.cuadrillaId != ''
                     && request.resource.data.fecha is string
                     && request.resource.data.destinoTipo in ['obra', 'taller'];
 

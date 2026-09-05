@@ -11,6 +11,7 @@ import autoTable from 'jspdf-autotable';
 import { horasTotalesDocumento } from '../utils/horasDocumento';
 import { HORAS_BASE_POR_DEFECTO } from '../utils/nomina';
 import { cambioDeEstado, trocearParaConsulta } from '../logica/acopios';
+import { correosDeCuadrilla } from '../logica/cuadrantes';
 
 import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV, fechaParaNombre } from '../utils/csv';
 import { hidratarPartes, rangoDeFechas, filtrarPorRango, buscarPartes, resumenDelDia, marcarFacturados } from '../logica/partes';
@@ -198,14 +199,22 @@ export default function PanelOficina({ cambiarVista }) {
   }, []);
 
   const crearCuadrilla = async (nombre) => {
-      await addDoc(collection(db, 'cuadrillas'), { nombre, operarios: [], papelera: false });
+      await addDoc(collection(db, 'cuadrillas'), { nombre, operarios: [], operarioEmails: [], papelera: false });
       refrescarCatalogosPlanificacion();
       mostrarToast('Cuadrilla creada.');
   };
 
+  // `operarioEmails` se deriva aquí y NO se recibe de fuera: es el único sitio por el
+  // que pasan tanto el alta como la baja de un integrante, así que derivarlo aquí es lo
+  // que garantiza que los dos arrays no puedan contarse cosas distintas.
+  //
+  // De este array cuelga ahora quién puede LEER las asignaciones de la cuadrilla: las
+  // reglas de `cuadrantes` lo resuelven en vivo con get(). Escribirlo mal no descuadra
+  // una etiqueta, deja a alguien sin ver su trabajo o se lo enseña a quien ya no va.
   const actualizarOperariosCuadrilla = async (id, operarios) => {
-      await updateDoc(doc(db, 'cuadrillas', id), { operarios });
-      actualizarEnLista(setCuadrillasList, id, { operarios });
+      const operarioEmails = correosDeCuadrilla(operarios);
+      await updateDoc(doc(db, 'cuadrillas', id), { operarios, operarioEmails });
+      actualizarEnLista(setCuadrillasList, id, { operarios, operarioEmails });
   };
 
   const borrarCuadrilla = (id) => {

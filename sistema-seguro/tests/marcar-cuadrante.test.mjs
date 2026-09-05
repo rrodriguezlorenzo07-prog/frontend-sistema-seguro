@@ -55,8 +55,8 @@ function igual(actual, esperado, mensaje) {
 const asignacion = (extra = {}) => ({
   fecha: '2026-09-04', horaInicio: '08:00', horaFin: '14:00',
   cuadrillaId: 'c1', cuadrillaNombre: 'Cuadrilla A',
+  // Etiqueta informativa. Quién puede leerla lo decide la cuadrilla viva, no esta copia.
   operarios: [{ trabajadorId: 't0', nombre: 'Juan', email: 'juan@empresa.com' }],
-  operarioEmails: ['juan@empresa.com'],
   vehiculoId: 'v1', vehiculoNombre: 'Furgoneta 1',
   destinoTipo: 'obra', obraId: 'o1', obraNombre: 'Hotel Sol',
   estado: 'planificado', parteId: null,
@@ -108,7 +108,7 @@ async function main() {
     const doc = await db.doc('cuadrantes/asig-1').get();
     igual(doc.get('obraNombre'), 'Hotel Sol', 'obraNombre');
     igual(doc.get('cuadrillaNombre'), 'Cuadrilla A', 'cuadrillaNombre');
-    igual(doc.get('operarioEmails').length, 1, 'operarioEmails');
+    igual(doc.get('operarios').length, 1, 'operarios');
   });
 
   // ================================================ sin asignación

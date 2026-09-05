@@ -165,7 +165,7 @@ async function main() {
   await comprobar('partes_de_trabajo responde como antes', async () => {
     await assertFails(getDocs(collection(juan, 'partes_de_trabajo')));
   });
-  await comprobar('cuadrantes sigue exigiendo el filtro por operarioEmails', async () => {
+  await comprobar('cuadrantes sigue exigiendo el filtro por cuadrillaId', async () => {
     await assertFails(getDocs(collection(juan, 'cuadrantes')));
   });
   await comprobar('roles sigue cerrado a todos', async () => {

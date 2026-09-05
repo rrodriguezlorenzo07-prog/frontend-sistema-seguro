@@ -254,12 +254,23 @@ test('construirAsignacion', async (t) => {
         assert.equal(a.obraNombre, 'Hotel Sol');
     });
 
-    await t.test('PASA · el array plano para las reglas sale normalizado', () => {
+    await t.test('PASA · NO guarda operarioEmails: los permisos los da la cuadrilla viva', () => {
+        // Esta copia era el bug: se escribía al planificar y no se enteraba de que
+        // alguien entrara o saliera de la cuadrilla después.
         const a = construirAsignacion({
             fecha: '2026-09-04', horaInicio: '08:00', horaFin: '14:00',
             cuadrilla, destinoTipo: 'taller', creadoPor: 'oficina@empresa.com'
         });
-        assert.deepEqual(a.operarioEmails, ['juan@empresa.com', 'ana@empresa.com']);
+        assert.ok(!('operarioEmails' in a), 'la asignación no debe llevar operarioEmails');
+        assert.equal(a.cuadrillaId, 'c1', 'de cuadrillaId cuelga ahora el permiso');
+    });
+
+    await t.test('PASA · operarios se queda como etiqueta de quién estaba previsto', () => {
+        const a = construirAsignacion({
+            fecha: '2026-09-04', horaInicio: '08:00', horaFin: '14:00',
+            cuadrilla, destinoTipo: 'taller', creadoPor: 'oficina@empresa.com'
+        });
+        assert.deepEqual(a.operarios.map((o) => o.email), ['juan@empresa.com', 'ana@empresa.com']);
     });
 
     await t.test('PASA · destino taller deja obraId y obraNombre en null', () => {
