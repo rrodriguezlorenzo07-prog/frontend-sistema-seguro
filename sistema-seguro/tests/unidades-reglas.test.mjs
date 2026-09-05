@@ -172,7 +172,7 @@ async function main() {
     await assertFails(getDoc(doc(admin, 'roles/uid-admin')));
   });
   await comprobar('una colección inventada sigue denegada', async () => {
-    await assertFails(getDoc(doc(admin, 'acopios/x')));
+    await assertFails(getDoc(doc(admin, 'coleccion_que_no_existe/x')));
   });
 
   await testEnv.cleanup();

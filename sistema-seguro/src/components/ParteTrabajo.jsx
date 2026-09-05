@@ -1,7 +1,7 @@
 // @ts-check
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, storage, auth } from '../firebase'; 
-import { collection, getDocs, query, where, orderBy, doc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { ref, uploadString } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { FileText, FolderOpen, Send, Package, Trash2, PenTool, Plus, CheckSquare, LogOut, Building2, MapPin, Clock, Truck, Wrench, Users, AlertTriangle, ArrowLeft } from 'lucide-react';
@@ -13,6 +13,8 @@ import Tarjeta from '../ui/Tarjeta';
 import Etiqueta from '../ui/Etiqueta';
 import { destinoDeAsignacion, normalizarHorasReportadas, contrasteDeJornada, ordenarPorHora } from '../logica/cuadrantes';
 import { previsualizarPropuesta, unidadesDesdeLinea } from '../logica/unidades';
+import { cambioDeEstado } from '../logica/acopios';
+import AcopiosDeMiObra from './AcopiosDeMiObra';
 
 export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   // --- Asignación del cuadrante (Pieza 2) ---
@@ -26,6 +28,13 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   // Horas reportadas. INFORMATIVAS (D5): no entran en el cálculo de nómina.
   const [horasTaller, setHorasTaller] = useState('');
   const [horasCalle, setHorasCalle] = useState('');
+
+  // --- Acopios de la obra asignada (Pieza 4, A3). Se cargan al elegir asignación:
+  // sin obra no hay material que marcar.
+  const [acopios, setAcopios] = useState([]);
+  const [cargandoAcopios, setCargandoAcopios] = useState(false);
+  const [moviendoAcopio, setMoviendoAcopio] = useState(null);
+  const [vistaAcopios, setVistaAcopios] = useState(false);
 
   const [obrasList, setObrasList] = useState([]);
   const [inventario, setInventario] = useState([]);
@@ -157,6 +166,58 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
   };
 
   // === ENVÍO DEL PARTE ===
+  // Los acopios se cargan al elegir la asignación: dependen de la obra, y sin obra no
+  // hay material que marcar. Se consulta por obraId, que es lo que indexa la colección.
+  const cargarAcopios = useCallback(async (obraId) => {
+      if (!obraId) { setAcopios([]); return; }
+      setCargandoAcopios(true);
+      try {
+          const snap = await getDocs(query(
+              collection(db, 'acopios'),
+              where('obraId', '==', obraId),
+              orderBy('creadoEn')
+          ));
+          setAcopios(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (error) {
+          // Que falle esto no debe impedir hacer el parte, que es lo importante.
+          console.error('No se pudieron cargar los acopios:', error);
+          setAcopios([]);
+      } finally {
+          setCargandoAcopios(false);
+      }
+  }, []);
+
+  useEffect(() => {
+      cargarAcopios(asignacionElegida?.obraId ?? null);
+  }, [asignacionElegida, cargarAcopios]);
+
+  /**
+   * Mueve un acopio de estado.
+   *
+   * EL ORDEN LO VALIDA LA LÓGICA, no las reglas: `cambioDeEstado` devuelve null y un
+   * motivo si la transición no vale, y solo entonces se escribe. Las reglas comprueban
+   * aparte quién escribe y qué campos toca.
+   */
+  const moverAcopio = async (acopio, nuevoEstado) => {
+      const { cambios, motivo } = cambioDeEstado(acopio, nuevoEstado, usuario.email);
+      if (!cambios) {
+          setMensaje({ texto: motivo.toUpperCase(), tipo: 'error' });
+          setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3000);
+          return;
+      }
+      setMoviendoAcopio(acopio.id);
+      try {
+          await updateDoc(doc(db, 'acopios', acopio.id), cambios);
+          setAcopios((prev) => prev.map((a) => (a.id === acopio.id ? { ...a, ...cambios } : a)));
+      } catch (error) {
+          console.error('No se pudo mover el acopio:', error);
+          setMensaje({ texto: 'NO SE PUDO GUARDAR EL CAMBIO', tipo: 'error' });
+          setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3000);
+      } finally {
+          setMoviendoAcopio(null);
+      }
+  };
+
   const enviarParte = async (e) => {
     e.preventDefault();
     if (tareasRealizadas.length === 0 && !trabajoLibre.trim()) {
@@ -334,8 +395,13 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
       {/* NAVEGACIÓN SUPERIOR */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: espacio.lg, borderBottom: `1px solid ${color.linea}`, paddingBottom: espacio.md, flexWrap: 'wrap', gap: espacio.sm }}>
         <div style={{ display: 'flex', gap: '10px', flex: 1, minWidth: '200px' }}>
-            <button onClick={() => setVistaMisPartes(false)} style={btnStyle(!vistaMisPartes)}><FileText size={16} /> Parte</button>
-            <button onClick={() => setVistaMisPartes(true)} style={btnStyle(vistaMisPartes)}><FolderOpen size={16} /> Historial</button>
+            <button onClick={() => { setVistaMisPartes(false); setVistaAcopios(false); }} style={btnStyle(!vistaMisPartes && !vistaAcopios)}><FileText size={16} /> Parte</button>
+            {acopios.length > 0 && (
+                <button onClick={() => { setVistaMisPartes(false); setVistaAcopios(true); }} style={btnStyle(vistaAcopios)}>
+                    <Package size={16} /> Material
+                </button>
+            )}
+            <button onClick={() => { setVistaMisPartes(true); setVistaAcopios(false); }} style={btnStyle(vistaMisPartes)}><FolderOpen size={16} /> Historial</button>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
             {esAdmin && (
@@ -349,7 +415,15 @@ export default function ParteTrabajo({ usuario, esAdmin, volverOficina }) {
         </div>
       </div>
 
-      {!vistaMisPartes ? (
+      {vistaAcopios ? (
+        <AcopiosDeMiObra
+          acopios={acopios}
+          obraNombre={asignacionElegida?.obraNombre ?? 'tu obra'}
+          cargando={cargandoAcopios}
+          onMover={moverAcopio}
+          moviendoId={moviendoAcopio}
+        />
+      ) : !vistaMisPartes ? (
         (!asignacionElegida && !modoLibre) ? (
           <SelectorDeAsignacion
             asignaciones={asignaciones}

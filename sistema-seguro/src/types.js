@@ -271,4 +271,32 @@
  * @property {number|null} confirmadaEn
  */
 
+// -------------------------------------------------------------------- acopios
+
+/**
+ * Material concreto reservado para una obra concreta. Vive en `acopios/{id}`.
+ *
+ * NO ES INVENTARIO. `inventario/` sigue siendo el stock general y su descuento al
+ * aprobar un parte no se toca (D4): son dos sistemas paralelos. Un acopio no resta
+ * stock, dice dónde está una pieza en su camino hacia la furgoneta.
+ *
+ * @typedef {Object} Acopio
+ * @property {string} [id]
+ * @property {string} obraId
+ * @property {string|null} obraNombre denormalizado
+ * @property {string|null} materialId del catálogo; null si es una pieza a medida
+ * @property {string} materialNombre COPIA CONGELADA, no referencia: el catálogo se
+ *   identifica por nombre y renombrarlo no debe romper el acopio
+ * @property {string} descripcion
+ * @property {number} cantidad admite decimales: metros lineales, m²
+ * @property {'ud'|'ml'|'m2'|'kg'} unidad propia; el catálogo no la tiene
+ * @property {boolean} requiereFabricacion si es false se salta «fabricado» (A2)
+ * @property {'pendiente'|'fabricado'|'recepcionado'|'listo'} estado
+ * @property {Array<{estado: string, en: number, por: string}>} historial
+ * @property {number} actualizadoEn
+ * @property {string} actualizadoPor quién movió el último estado
+ * @property {number} creadoEn
+ * @property {string} creadoPor siempre oficina (A1)
+ */
+
 export {};

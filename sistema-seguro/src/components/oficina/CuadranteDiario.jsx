@@ -27,6 +27,7 @@ import Etiqueta from '../../ui/Etiqueta';
 import Insignia from '../../ui/Insignia';
 import Modal from '../../ui/Modal';
 import { filasDelTablero, solapesDe, franjaValida, construirAsignacion } from '../../logica/cuadrantes';
+import { agruparPorObra, loQueFalta } from '../../logica/acopios';
 
 /** La hora actual redondeada a la media hora siguiente, para la asignación rápida. */
 function horaRedondeada() {
@@ -54,7 +55,9 @@ export default function CuadranteDiario({
     obrasActivas,
     crearAsignacion,
     borrarAsignacion,
-    guardando
+    guardando,
+    // Acopios de las obras del día, para avisar de lo que FALTA (A4).
+    acopiosDelDia = []
 }) {
     const [abierto, setAbierto] = useState(false);
     const [rapida, setRapida] = useState(false);
@@ -65,6 +68,10 @@ export default function CuadranteDiario({
         () => filasDelTablero(cuadrillasList, asignaciones),
         [cuadrillasList, asignaciones]
     );
+
+    // LO QUE FALTA, no lo que está listo: «hay 4 preparados» es decoración; lo que
+    // evita conducir cuarenta minutos en balde es «quedan 2 sin recepcionar».
+    const acopiosPorObra = useMemo(() => agruparPorObra(acopiosDelDia), [acopiosDelDia]);
 
     const hoy = new Date().toISOString().slice(0, 10);
 
@@ -251,6 +258,17 @@ export default function CuadranteDiario({
                                                 </span>
                                             ) : null}
                                             {a.estado === 'parte_enviado' ? <Insignia tono="exito">Parte enviado</Insignia> : null}
+                                            {(() => {
+                                                if (!a.obraId) return null;
+                                                const falta = loQueFalta(acopiosPorObra.get(a.obraId) || []);
+                                                if (falta.total === 0 || falta.faltan === 0) return null;
+                                                return (
+                                                    <span title={falta.resumen}
+                                                        style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: texto.menor, color: color.aviso, fontWeight: peso.fuerte }}>
+                                                        <AlertTriangle size={12} /> {falta.resumen}
+                                                    </span>
+                                                );
+                                            })()}
                                             <button
                                                 type="button"
                                                 onClick={() => borrarAsignacion(a.id)}

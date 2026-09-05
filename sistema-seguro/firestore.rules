@@ -346,6 +346,39 @@ service cloud.firestore {
       );
     }
 
+    // ========================================================= ACOPIOS (Pieza 4)
+    //
+    // Material reservado para una obra. NO es inventario: `inventario/` y su descuento
+    // al aprobar un parte siguen intactos (D4). Aquí no se resta stock de nada.
+    //
+    // A1: la oficina planifica qué hace falta y crea el acopio.
+    // A3: el operario mueve TODOS los estados desde el móvil, no solo el último.
+
+    match /acopios/{acopioId} {
+
+      // Todos leen: el operario necesita saber qué cargar y qué falta.
+      allow get, list: if autenticado();
+
+      // Solo oficina planifica y retira. Un acopio es una decisión de qué comprar o
+      // fabricar, no algo que surja en la obra.
+      allow create, delete: if esAdmin();
+
+      // El operario mueve el estado, y NADA MÁS. La lista blanca es lo que impide que
+      // "marcar recepcionado" se convierta en "reescribir el acopio": no puede cambiar
+      // de obra, ni de material, ni la cantidad, ni si requiere fabricación.
+      //
+      // EL ORDEN DE LOS ESTADOS NO SE COMPRUEBA AQUÍ, a propósito: vive en
+      // src/logica/acopios.js, donde se prueba con node --test en milisegundos en vez
+      // de levantando un emulador. Las reglas protegen de un tercero malicioso; la
+      // lógica, del error honesto de un dedo con guantes.
+      allow update: if esAdmin() || (
+           autenticado()
+        && tocados().hasOnly(['estado', 'historial', 'actualizadoEn', 'actualizadoPor'])
+        && request.resource.data.actualizadoPor.lower() == correo()
+        && request.resource.data.estado in ['pendiente', 'fabricado', 'recepcionado', 'listo']
+      );
+    }
+
     // ------------------------------------------------------- denegación por defecto
 
     match /{document=**} {

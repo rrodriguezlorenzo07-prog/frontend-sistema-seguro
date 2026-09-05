@@ -112,6 +112,44 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "//": [
+        "La pantalla de acopios de una obra.",
+        "  where('obraId','==', id) + orderBy('creadoEn')"
+      ],
+      "collectionGroup": "acopios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "obraId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "creadoEn",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": [
+        "Lo que FALTA en el tablero (A4): los acopios de varias obras que aún no están",
+        "listos.",
+        "  where('obraId','in', [...]) + where('estado','!=','listo')",
+        "El `in` admite 30 valores; trocearParaConsulta() de logica/acopios.js lo respeta."
+      ],
+      "collectionGroup": "acopios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "obraId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

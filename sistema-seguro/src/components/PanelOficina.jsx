@@ -10,6 +10,7 @@ import autoTable from 'jspdf-autotable';
 
 import { horasTotalesDocumento } from '../utils/horasDocumento';
 import { HORAS_BASE_POR_DEFECTO } from '../utils/nomina';
+import { cambioDeEstado, trocearParaConsulta } from '../logica/acopios';
 
 import { construirCSV, descargarCSV, textoCSV, numeroCSV, enteroCSV, fechaParaNombre } from '../utils/csv';
 import { hidratarPartes, rangoDeFechas, filtrarPorRango, buscarPartes, resumenDelDia, marcarFacturados } from '../logica/partes';
@@ -33,6 +34,7 @@ import PapeleraReciclaje from './oficina/PapeleraReciclaje';
 import GestionCuadrillas from './oficina/GestionCuadrillas';
 import GestionVehiculos from './oficina/GestionVehiculos';
 import CuadranteDiario from './oficina/CuadranteDiario';
+import AcopiosObra from './oficina/AcopiosObra';
 
 export default function PanelOficina({ cambiarVista }) {
   const TAMANO_PAGINA = 300;
@@ -56,6 +58,13 @@ export default function PanelOficina({ cambiarVista }) {
   // (Pieza 3, D7). Se cargan al abrir el parte, no en la carga general del panel.
   const [unidadesPropuestas, setUnidadesPropuestas] = useState([]);
   const [unidadesAConfirmar, setUnidadesAConfirmar] = useState([]);
+
+  // --- Acopios (Pieza 4). `acopiosDelDia` alimenta el aviso de lo que FALTA en el
+  // tablero (A4); `acopiosDeLaObra` es la pantalla de planificación.
+  const [obraAcopios, setObraAcopios] = useState(null);
+  const [acopiosDeLaObra, setAcopiosDeLaObra] = useState([]);
+  const [acopiosDelDia, setAcopiosDelDia] = useState([]);
+  const [guardandoAcopio, setGuardandoAcopio] = useState(false);
   const [trabajadoresList, setTrabajadoresList] = useState([]);
   const [certificacionesList, setCertificacionesList] = useState([]);
   const [facturasList, setFacturasList] = useState([]);
@@ -229,6 +238,66 @@ export default function PanelOficina({ cambiarVista }) {
       });
   };
 
+  // ------------------------------------------------------------------ acopios
+
+  const refrescarAcopiosDeObra = useCallback(async (obraId) => {
+      if (!obraId) { setAcopiosDeLaObra([]); return; }
+      const snap = await getDocs(query(
+          collection(db, 'acopios'), where('obraId', '==', obraId), orderBy('creadoEn')
+      ));
+      setAcopiosDeLaObra(mapear(snap));
+  }, []);
+
+  /**
+   * Los acopios de las obras que tienen asignación ese día, para el aviso del tablero.
+   *
+   * Se trocea en grupos de 30 porque el operador `in` de Firestore no admite más. Hoy
+   * hay tres obras y no hace falta, pero una consulta que revienta el día que la
+   * empresa crece fallaría en forma de pantalla en blanco, sin aviso.
+   */
+  const refrescarAcopiosDelDia = useCallback(async (asignacionesDelDia) => {
+      const trozos = trocearParaConsulta(asignacionesDelDia.map((a) => a.obraId));
+      if (trozos.length === 0) { setAcopiosDelDia([]); return; }
+      try {
+          const lotes = await Promise.all(trozos.map((ids) =>
+              getDocs(query(collection(db, 'acopios'), where('obraId', 'in', ids)))
+          ));
+          setAcopiosDelDia(lotes.flatMap((snap) => mapear(snap)));
+      } catch (error) {
+          console.error('No se pudieron cargar los acopios del día:', error);
+          setAcopiosDelDia([]);
+      }
+  }, []);
+
+  const crearAcopio = async (acopio) => {
+      setGuardandoAcopio(true);
+      try {
+          await addDoc(collection(db, 'acopios'), { ...acopio, creadoPor: auth.currentUser?.email ?? 'oficina', actualizadoPor: auth.currentUser?.email ?? 'oficina' });
+          await refrescarAcopiosDeObra(acopio.obraId);
+          mostrarToast('Acopio añadido.');
+      } catch (error) {
+          console.error(error);
+          mostrarToast('No se pudo guardar el acopio: ' + error.message, 'error');
+      } finally {
+          setGuardandoAcopio(false);
+      }
+  };
+
+  const moverEstadoAcopio = async (acopio, nuevoEstado) => {
+      const { cambios, motivo } = cambioDeEstado(acopio, nuevoEstado, auth.currentUser?.email ?? 'oficina');
+      if (!cambios) { mostrarToast(motivo, 'error'); return; }
+      await updateDoc(doc(db, 'acopios', acopio.id), cambios);
+      actualizarEnLista(setAcopiosDeLaObra, acopio.id, cambios);
+  };
+
+  const borrarAcopio = (id) => {
+      pedirConfirmacion('Quitar acopio', '¿Quitar este material de la planificación de la obra?', async () => {
+          await deleteDoc(doc(db, 'acopios', id));
+          quitarDeLista(setAcopiosDeLaObra, id);
+          mostrarToast('Acopio quitado.');
+      });
+  };
+
   const crearAsignacion = async (asignacion) => {
       setGuardandoAsignacion(true);
       try {
@@ -300,6 +369,18 @@ export default function PanelOficina({ cambiarVista }) {
       if (categoriaActiva !== 'planificacion') return;
       refrescarCatalogosPlanificacion();
   }, [categoriaActiva, refrescarCatalogosPlanificacion]);
+
+  // Los acopios de la obra elegida en la pantalla de planificación.
+  useEffect(() => {
+      if (categoriaActiva !== 'almacen') return;
+      refrescarAcopiosDeObra(obraAcopios);
+  }, [categoriaActiva, obraAcopios, refrescarAcopiosDeObra]);
+
+  // Lo que falta para las obras del día, para el aviso del tablero (A4).
+  useEffect(() => {
+      if (categoriaActiva !== 'planificacion') return;
+      refrescarAcopiosDelDia(asignaciones);
+  }, [categoriaActiva, asignaciones, refrescarAcopiosDelDia]);
 
   // Las asignaciones se recargan al cambiar de día.
   useEffect(() => {
@@ -760,13 +841,15 @@ export default function PanelOficina({ cambiarVista }) {
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '30px', paddingLeft: '10px', flexWrap: 'wrap' }}>
           {categoriaActiva === 'planificacion' && ( <><button onClick={()=>setPestañaActiva('cuadrante')} style={subMenuBtnStyle(pestañaActiva === 'cuadrante')}>Cuadrante</button><button onClick={()=>setPestañaActiva('cuadrillas')} style={subMenuBtnStyle(pestañaActiva === 'cuadrillas')}>Cuadrillas</button><button onClick={()=>setPestañaActiva('vehiculos')} style={subMenuBtnStyle(pestañaActiva === 'vehiculos')}>Vehículos</button></> )}
+          {categoriaActiva === 'almacen' && ( <><button onClick={()=>setPestañaActiva('almacen')} style={subMenuBtnStyle(pestañaActiva === 'almacen')}>Inventario</button><button onClick={()=>setPestañaActiva('acopios')} style={subMenuBtnStyle(pestañaActiva === 'acopios')}>Acopios por Obra</button></> )}
           {categoriaActiva === 'proyectos' && ( <><button onClick={()=>setPestañaActiva('obras')} style={subMenuBtnStyle(pestañaActiva === 'obras')}>Gestión de Hoteles / Obras</button><button onClick={()=>setPestañaActiva('resumen')} style={subMenuBtnStyle(pestañaActiva === 'resumen')}>Métricas y Dashboard</button></> )}
           {categoriaActiva === 'documentos' && ( <><button onClick={()=>setPestañaActiva('partes')} style={subMenuBtnStyle(pestañaActiva === 'partes')}>Albaranes Históricos</button><button onClick={()=>setPestañaActiva('certificaciones')} style={subMenuBtnStyle(pestañaActiva === 'certificaciones')}>Certificaciones Mensuales</button><button onClick={()=>setPestañaActiva('facturacion')} style={subMenuBtnStyle(pestañaActiva === 'facturacion')}>Generar Factura</button></> )}
           {categoriaActiva === 'personal' && ( <><button onClick={()=>setPestañaActiva('trabajadores')} style={subMenuBtnStyle(pestañaActiva === 'trabajadores')}>Plantilla Activa</button><button onClick={()=>setPestañaActiva('horas')} style={subMenuBtnStyle(pestañaActiva === 'horas')}>Control de Nóminas</button></> )}
           {categoriaActiva === 'sistema' && ( <><button onClick={()=>setPestañaActiva('papelera')} style={subMenuBtnStyle(pestañaActiva === 'papelera')}>Papelera de Reciclaje</button></> )}
       </div>
 
-      {pestañaActiva === 'cuadrante' && ( <CuadranteDiario blockStyle={blockStyle} fecha={cuadranteFecha} setFecha={setCuadranteFecha} asignaciones={asignaciones} cuadrillasList={cuadrillasList} vehiculosList={vehiculosList} obrasActivas={obrasActivas} crearAsignacion={crearAsignacion} borrarAsignacion={borrarAsignacion} guardando={guardandoAsignacion} /> )}
+      {pestañaActiva === 'acopios' && ( <AcopiosObra blockStyle={blockStyle} obrasActivas={obrasActivas} materialesList={materialesList} obraAcopios={obraAcopios} setObraAcopios={setObraAcopios} acopiosDeLaObra={acopiosDeLaObra} crearAcopio={crearAcopio} moverEstadoAcopio={moverEstadoAcopio} borrarAcopio={borrarAcopio} guardandoAcopio={guardandoAcopio} /> )}
+      {pestañaActiva === 'cuadrante' && ( <CuadranteDiario blockStyle={blockStyle} fecha={cuadranteFecha} setFecha={setCuadranteFecha} asignaciones={asignaciones} cuadrillasList={cuadrillasList} vehiculosList={vehiculosList} obrasActivas={obrasActivas} crearAsignacion={crearAsignacion} borrarAsignacion={borrarAsignacion} guardando={guardandoAsignacion} acopiosDelDia={acopiosDelDia} /> )}
       {pestañaActiva === 'cuadrillas' && ( <GestionCuadrillas blockStyle={blockStyle} cuadrillasList={cuadrillasList} trabajadoresActivos={trabajadoresActivos} crearCuadrilla={crearCuadrilla} actualizarOperariosCuadrilla={actualizarOperariosCuadrilla} borrarCuadrilla={borrarCuadrilla} /> )}
       {pestañaActiva === 'vehiculos' && ( <GestionVehiculos blockStyle={blockStyle} vehiculosList={vehiculosList} crearVehiculo={crearVehiculo} guardarVehiculo={guardarVehiculo} borrarVehiculo={borrarVehiculo} /> )}
       {pestañaActiva === 'bandeja' && ( <BandejaValidacion partesPendientes={partesPendientes} parteAValidar={parteAValidar} setParteAValidar={setParteAValidar} nuevoOperario={nuevoOperario} setNuevoOperario={setNuevoOperario} trabajadoresList={trabajadoresActivos} agregarOperarioCuadrilla={agregarOperarioCuadrilla} cuadrilla={cuadrilla} cambiarHorasExtra={cambiarHorasExtra} setHorasExtraDirecto={setHorasExtraDirecto} validandoParte={validandoParte} quitarOperario={quitarDeLaCuadrilla} confirmarValidacionParte={confirmarValidacionParte} borrarParte={borrarParte} abrirValidacion={abrirValidacion} btnBlackStyle={btnBlackStyle} unidadesPropuestas={unidadesPropuestas} unidadesAConfirmar={unidadesAConfirmar} alternarUnidad={alternarUnidad} alternarTodasLasUnidades={alternarTodasLasUnidades} /> )}
